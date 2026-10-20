@@ -36,7 +36,7 @@ Core flow:
 | --- | --- | --- |
 | Reference size | 360×360 | KakaoTalk spec |
 | Output canvas | Square, default 120×120, padding 0% (user setting) | Needs calibration |
-| Image fit | Contain (default, whole image + background padding) or cover (center-cropped square); global setting | Decided |
+| Image fit | Contain (default, whole image + background padding), cover (center-cropped square), or original (stored image's own size, no canvas/scaling; size and padding ignored); global setting | Decided |
 | Background | Opaque, user's chat background color (default `#BACEE0`) | Decided |
 | Format | Stored: transparent PNG. Clipboard: opaque bitmap | Decided |
 
@@ -62,7 +62,7 @@ Core flow:
 ## Storage
 
 - The gallery is **persistent and folder-based**: one gallery folder on disk is the source of truth.
-- Processed images are saved as PNG files in that folder; the gallery lists the folder's contents on startup.
+- Processed images are saved as PNG files in that folder; the gallery lists the folder's contents on startup and picks up outside changes (files/folders added, replaced, or removed in Explorer) automatically by polling a folder fingerprint every 1.5 s while the window is not minimized. No watcher crate; no manual refresh button.
 - No database or separate index file unless needed later; the folder itself is the state.
 - **Portable:** everything lives in `거지티콘_data/` next to the exe: `settings.json`, the default gallery `gallery/`, and the WebView2 profile `webview/`. Nothing is written to AppData. Moving the exe together with that folder moves the whole app.
 - Gallery folder location: default `gallery` (relative paths resolve against the data folder), changeable in settings. Each subfolder is a tab (add / rename / delete-if-empty from the tab bar); PNGs in the root form the default tab, which cannot be renamed.

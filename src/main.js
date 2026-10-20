@@ -75,10 +75,46 @@ async function imageUrl(tab, name) {
   return urls.get(key);
 }
 
+// Gallery fingerprint as of the last refresh; see the folder watch below.
+let stamp = '';
+
 async function refresh() {
+  // Stamp before listing so a change landing in between is caught by the next poll.
+  stamp = await invoke('gallery_stamp');
   tabs = await invoke('list_tabs');
-  if (!tabs.some((t) => t.name === current)) current = '';
+  if (!tabs.some((t) => t.name === current)) {
+    current = '';
+    if (selection) endSelection();
+  }
+  if (selection) {
+    const files = new Set(tabs.find((t) => t.name === current).files);
+    for (const name of selection) if (!files.has(name)) selection.delete(name);
+    renderSelectBar();
+  }
   await Promise.all([renderPacks(), renderGrid()]);
+}
+
+// Picks up changes made outside the app (files copied in via Explorer, edits,
+// new folders) by polling the folder fingerprint; avoids a file-watcher crate.
+const WATCH_MS = 1500;
+let watching = false;
+function watchGallery() {
+  setInterval(async () => {
+    // Skip while minimized or while a tab name is being edited (refresh would drop the input).
+    if (watching || document.hidden || document.querySelector('.pack-input')) return;
+    watching = true;
+    try {
+      if (await invoke('gallery_stamp') === stamp) return;
+      // Files may have been overwritten under the same name, so drop cached images.
+      urls.forEach((u) => URL.revokeObjectURL(u));
+      urls.clear();
+      await refresh();
+    } catch {
+      stamp = ''; // e.g. a file still being copied; retry on the next tick
+    } finally {
+      watching = false;
+    }
+  }, WATCH_MS);
 }
 
 async function renderPacks() {
@@ -456,15 +492,26 @@ async function run(fn) {
 // Composites the stored (transparent) image onto the chat background color so
 // KakaoTalk cannot add its own white/black backdrop.
 function composite(img) {
-  const size = settings.size;
+  const w = img.naturalWidth;
+  const h = img.naturalHeight;
   const c = document.createElement('canvas');
-  c.width = c.height = size;
   const ctx = c.getContext('2d');
+  // "original": paste at the stored image's own size, no canvas or scaling.
+  if (settings.fit === 'original') {
+    c.width = w;
+    c.height = h;
+    ctx.fillStyle = settings.bg;
+    ctx.fillRect(0, 0, w, h);
+    ctx.drawImage(img, 0, 0);
+    return c;
+  }
+  const size = settings.size;
+  c.width = c.height = size;
   ctx.fillStyle = settings.bg;
   ctx.fillRect(0, 0, size, size);
   ctx.imageSmoothingQuality = 'high';
   const cover = settings.fit === 'cover';
-  const r = fitBox(img.naturalWidth, img.naturalHeight, size, settings.pad, cover);
+  const r = fitBox(w, h, size, settings.pad, cover);
   if (cover) {
     ctx.beginPath();
     ctx.rect(r.clip.x, r.clip.y, r.clip.w, r.clip.h);
@@ -679,8 +726,13 @@ $('set-remove').checked = settings.removeBg;
 $('set-remove').onchange = (e) => { settings.removeBg = e.target.checked; saveSettings(); };
 $('set-fit').value = settings.fit;
 $('set-fit').onchange = (e) => { settings.fit = e.target.value; saveSettings(); applyFit(); };
-// Gallery preview mirrors what gets copied.
-function applyFit() { document.documentElement.style.setProperty('--fit', settings.fit); }
+// Gallery preview mirrors what gets copied; "original" previews like contain.
+// Size and padding do not apply to "original".
+function applyFit() {
+  const original = settings.fit === 'original';
+  document.documentElement.style.setProperty('--fit', original ? 'contain' : settings.fit);
+  $('set-size').disabled = $('set-pad').disabled = original;
+}
 applyFit();
 
 // ---------- theme ----------
@@ -764,4 +816,5 @@ $('btn-settings').onclick = () => run(() => invoke('open_settings'));
     if (settings.pinned) await setPinned(true);
     await refresh();
   });
+  watchGallery();
 })();

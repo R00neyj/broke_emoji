@@ -2,7 +2,9 @@
 
 use std::{
     borrow::Cow,
+    collections::hash_map::DefaultHasher,
     fs,
+    hash::{Hash, Hasher},
     path::{Path, PathBuf},
     sync::Mutex,
     time::{SystemTime, UNIX_EPOCH},
@@ -114,6 +116,36 @@ fn list_tabs(state: State<Gallery>) -> Result<Vec<Tab>, String> {
         tabs.push(Tab { name, files });
     }
     Ok(tabs)
+}
+
+/// Fingerprint of the gallery (tab folders plus PNG names, sizes, mtimes). The UI
+/// polls it to pick up changes made outside the app, e.g. files copied in via
+/// Explorer. A string because a u64 does not fit a JS number.
+#[tauri::command]
+fn gallery_stamp(state: State<Gallery>) -> String {
+    let mut h = DefaultHasher::new();
+    hash_dir(&root(&state), &mut h, true);
+    format!("{:x}", h.finish())
+}
+
+fn hash_dir(dir: &Path, h: &mut DefaultHasher, tabs: bool) {
+    let Ok(entries) = fs::read_dir(dir) else { return };
+    let mut entries: Vec<_> = entries.flatten().collect();
+    entries.sort_by_key(|e| e.file_name());
+    for e in entries {
+        let Ok(meta) = e.metadata() else { continue };
+        let name = e.file_name();
+        if meta.is_dir() {
+            if tabs {
+                name.hash(h);
+                hash_dir(&e.path(), h, false);
+            }
+        } else if name.to_string_lossy().to_ascii_lowercase().ends_with(".png") {
+            name.hash(h);
+            meta.len().hash(h);
+            meta.modified().ok().hash(h);
+        }
+    }
 }
 
 #[tauri::command]
@@ -387,7 +419,8 @@ async fn open_settings(app: tauri::AppHandle, data: State<'_, DataDir>) -> Resul
     }
     builder
         .title(format!("{APP_NAME} 설정"))
-        .inner_size(360.0, 620.0)
+        // Tall enough to show every setting without scrolling (content ≈ 685px at 360 wide).
+        .inner_size(360.0, 700.0)
         .min_inner_size(320.0, 400.0)
         .disable_drag_drop_handler()
         // Must match the main window: WebView2 allows one profile per process.
@@ -414,6 +447,7 @@ fn main() {
             open_gallery,
             save_settings,
             list_tabs,
+            gallery_stamp,
             read_image,
             save_image,
             delete_image,
