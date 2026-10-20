@@ -2,5 +2,5 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "windows": ["main"],
-  "permissions": ["core:default", "core:window:allow-set-always-on-top"]
+  "permissions": ["core:default", "core:window:allow-set-always-on-top", "core:window:allow-set-theme"]
 }

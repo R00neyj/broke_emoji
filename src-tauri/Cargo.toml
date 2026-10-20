@@ -11,6 +11,18 @@ tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 # Clipboard image write (CF_DIBV5/PNG) so the result pastes straight into KakaoTalk.
 arboard = "3"
+# Native file drag-out (CF_HDROP) so images can be dropped into a KakaoTalk chat.
+drag = "2"
+
+[target.'cfg(windows)'.dependencies]
+# Left-button state check before a native drag, and the screen color picker
+# (cursor position + screen pixel). Already in the tree via tauri.
+windows-sys = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_Graphics_Gdi",
+  "Win32_UI_Input_KeyboardAndMouse",
+  "Win32_UI_WindowsAndMessaging",
+] }
 
 [profile.release]
 opt-level = "s"

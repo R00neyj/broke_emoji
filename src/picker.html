@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <style>
+    html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; }
+    .tip {
+      box-sizing: border-box;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0 10px 0 6px;
+      border: 1px solid rgba(0, 0, 0, .25);
+      border-radius: 8px;
+      background: #fff;
+      font: 13px "Malgun Gothic", system-ui, sans-serif;
+      color: #222;
+    }
+    .swatch { width: 24px; height: 24px; border-radius: 5px; border: 1px solid rgba(0, 0, 0, .3); }
+  </style>
+</head>
+<body>
+  <!-- Eyedropper cursor companion: shows the color under the cursor while picking. -->
+  <div class="tip"><span id="swatch" class="swatch"></span><span id="hex"></span></div>
+  <script>
+    function show(hex) {
+      document.getElementById('swatch').style.background = hex;
+      document.getElementById('hex').textContent = hex.toUpperCase();
+    }
+  </script>
+</body>
+</html>

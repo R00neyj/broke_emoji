@@ -43,10 +43,11 @@ Core flow:
 
 - **Tauri 2** (Rust backend + web UI). Decided with the project owner.
 - **Frontend:** plain HTML/CSS/JS (vanilla). No UI framework or bundler unless the owner approves. Image processing runs here on `<canvas>` (`src/imaging.js` holds DOM-free pixel logic).
-- **Backend (Rust):** gallery file I/O and clipboard only. Crates: `tauri`, `serde`, `arboard` (clipboard image write). Keep crates minimal and justify each one.
+- **Backend (Rust):** gallery file I/O, clipboard, native drag only. Crates: `tauri`, `serde`, `arboard` (clipboard image write), `drag` (OS file drag-out). Keep crates minimal and justify each one.
 - **Clipboard:** copy processed images as image data (not file paths) so they paste directly into KakaoTalk.
-- **Window:** small, resizable; a pin button toggles always-on-top.
-- **Theme:** follows the OS light/dark setting automatically (`prefers-color-scheme`). Colors live as CSS variables in `:root`; never hardcode UI colors.
+- **Window:** small, resizable; default and minimum 340×320 (fits 4 columns). Gallery cells are fixed at 70px with 10px gaps, matching KakaoTalk's emoticon window; wider windows add columns. A pin button toggles always-on-top.
+- **Theme:** setting with System (default, follows the OS light/dark mode live), Light, Dark. Applied as `data-theme` on `<html>` plus the native title bar. Colors live as CSS variables in `:root`; never hardcode UI colors.
+- **Drag out:** dragging a cell out of the window starts a native file drag (crate `drag`) of the composited PNG written to `<data>/drag/`, so it can be dropped into a KakaoTalk chat. That folder is cleared on app start, not per drag, because the drop target may read the file later.
 
 ## Build
 
@@ -59,7 +60,7 @@ Core flow:
 - Processed images are saved as PNG files in that folder; the gallery lists the folder's contents on startup.
 - No database or separate index file unless needed later; the folder itself is the state.
 - **Portable:** everything lives in `거지티콘_data/` next to the exe: `settings.json`, the default gallery `gallery/`, and the WebView2 profile `webview/`. Nothing is written to AppData. Moving the exe together with that folder moves the whole app.
-- Gallery folder location: default `gallery` (relative paths resolve against the data folder), changeable in settings. Each subfolder is a tab; PNGs in the root form the default tab.
+- Gallery folder location: default `gallery` (relative paths resolve against the data folder), changeable in settings. Each subfolder is a tab (add / rename / delete-if-empty from the tab bar); PNGs in the root form the default tab, which cannot be renamed.
 
 ## Documentation Rules
 

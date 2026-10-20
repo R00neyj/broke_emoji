@@ -9,7 +9,7 @@ use std::{
 };
 
 use serde::Serialize;
-use tauri::{ipc::Response, Manager, State, WebviewUrl, WebviewWindowBuilder};
+use tauri::{ipc::Response, Manager, State, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 
 const APP_NAME: &str = "거지티콘";
 
@@ -35,7 +35,9 @@ fn plain(name: &str) -> Result<&str, String> {
     let bad = name.is_empty()
         || name == "."
         || name == ".."
-        || name.chars().any(|c| matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') || c.is_control());
+        || name
+            .chars()
+            .any(|c| matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') || c.is_control());
     if bad {
         Err(format!("잘못된 이름: {name}"))
     } else {
@@ -74,7 +76,10 @@ fn png_files(dir: &Path) -> Vec<String> {
 /// Returns the path as it should be shown/saved (relative when inside the data folder).
 #[tauri::command]
 fn open_gallery(data: State<DataDir>, state: State<Gallery>, dir: Option<String>) -> Result<String, String> {
-    let dir = dir.map(|d| d.trim().to_owned()).filter(|d| !d.is_empty()).unwrap_or_else(|| "gallery".into());
+    let dir = dir
+        .map(|d| d.trim().to_owned())
+        .filter(|d| !d.is_empty())
+        .unwrap_or_else(|| "gallery".into());
     let path = data.0.join(&dir);
     fs::create_dir_all(&path).map_err(err)?;
     let shown = match path.strip_prefix(&data.0) {
@@ -93,7 +98,10 @@ fn save_settings(data: State<DataDir>, json: String) -> Result<(), String> {
 #[tauri::command]
 fn list_tabs(state: State<Gallery>) -> Result<Vec<Tab>, String> {
     let root = root(&state);
-    let mut tabs = vec![Tab { name: String::new(), files: png_files(&root) }];
+    let mut tabs = vec![Tab {
+        name: String::new(),
+        files: png_files(&root),
+    }];
     let mut dirs: Vec<String> = fs::read_dir(&root)
         .map_err(err)?
         .flatten()
@@ -147,8 +155,22 @@ fn delete_tab(state: State<Gallery>, name: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn rename_tab(state: State<Gallery>, from: String, to: String) -> Result<(), String> {
+    let root = root(&state);
+    let target = root.join(plain(to.trim())?);
+    if target.exists() {
+        return Err("같은 이름의 탭이 이미 있어요".into());
+    }
+    fs::rename(root.join(plain(&from)?), target).map_err(err)
+}
+
+#[tauri::command]
 fn reveal_gallery(state: State<Gallery>) -> Result<(), String> {
-    std::process::Command::new("explorer").arg(root(&state)).spawn().map(|_| ()).map_err(err)
+    std::process::Command::new("explorer")
+        .arg(root(&state))
+        .spawn()
+        .map(|_| ())
+        .map_err(err)
 }
 
 /// Puts an opaque RGBA bitmap on the clipboard as image data (not a file path).
@@ -158,8 +180,170 @@ fn copy_image(width: usize, height: usize, rgba: Vec<u8>) -> Result<(), String> 
         return Err("이미지 크기가 맞지 않아요".into());
     }
     arboard::Clipboard::new()
-        .and_then(|mut c| c.set_image(arboard::ImageData { width, height, bytes: Cow::Owned(rgba) }))
+        .and_then(|mut c| {
+            c.set_image(arboard::ImageData {
+                width,
+                height,
+                bytes: Cow::Owned(rgba),
+            })
+        })
         .map_err(err)
+}
+
+/// Writes the composited PNG to `<data>/drag/` and starts an OS file drag
+/// (CF_HDROP), so it can be dropped into a KakaoTalk chat like a file from Explorer.
+/// The drop target may read the file later (e.g. after a send confirmation), so
+/// files are only cleared on the next app start.
+#[tauri::command]
+fn start_drag(window: WebviewWindow, data: State<DataDir>, png: Vec<u8>) -> Result<(), String> {
+    let dir = data.0.join("drag");
+    fs::create_dir_all(&dir).map_err(err)?;
+    let stamp = SystemTime::now().duration_since(UNIX_EPOCH).map_err(err)?.as_millis();
+    let path = dir.join(format!("{APP_NAME}_{stamp}.png"));
+    fs::write(&path, png).map_err(err)?;
+    // DoDragDrop runs a modal loop and must be on the UI thread.
+    let w = window.clone();
+    window
+        .run_on_main_thread(move || {
+            // If the button was already released (very quick fling), DoDragDrop would
+            // wait for the next click and drop wherever the cursor happens to be.
+            if !left_button_down() {
+                return;
+            }
+            let _ = drag::start_drag(
+                &w,
+                drag::DragItem::Files(vec![path.clone()]),
+                drag::Image::File(path),
+                |_, _| {},
+                drag::Options::default(),
+            );
+        })
+        .map_err(err)
+}
+
+#[cfg(windows)]
+fn key_down(vk: u16) -> bool {
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
+    // SAFETY: plain Win32 call without pointers.
+    (unsafe { GetAsyncKeyState(vk as i32) } as u16) & 0x8000 != 0
+}
+
+#[cfg(windows)]
+fn left_button_down() -> bool {
+    key_down(windows_sys::Win32::UI::Input::KeyboardAndMouse::VK_LBUTTON)
+}
+
+#[cfg(not(windows))]
+fn left_button_down() -> bool {
+    true
+}
+
+/// Screen eyedropper. WebView2 exposes `EyeDropper` but `open()` aborts at once,
+/// so this reads the pixel under the cursor directly: streams the live color to
+/// `on_move`, returns it on the next left click, `None` on Esc or after 60 s.
+/// A small click-through swatch window follows the cursor so the user can see
+/// that picking is active. The click itself still reaches the window underneath.
+#[cfg(windows)]
+#[tauri::command]
+async fn pick_screen_color(
+    app: tauri::AppHandle,
+    data: State<'_, DataDir>,
+    on_move: tauri::ipc::Channel<String>,
+) -> Result<Option<String>, String> {
+    use std::time::{Duration, Instant};
+    use tauri::PhysicalPosition;
+    use windows_sys::Win32::{
+        Foundation::POINT,
+        Graphics::Gdi::{GetDC, GetPixel, ReleaseDC, CLR_INVALID},
+        UI::{Input::KeyboardAndMouse::VK_ESCAPE, WindowsAndMessaging::GetCursorPos},
+    };
+
+    // Offset keeps the swatch out from under the cursor (it would be sampled otherwise).
+    const OFFSET: i32 = 20;
+    let swatch = match app.get_webview_window("picker") {
+        Some(w) => w,
+        None => WebviewWindowBuilder::new(&app, "picker", WebviewUrl::App("picker.html".into()))
+            .inner_size(132.0, 36.0)
+            .decorations(false)
+            .transparent(true)
+            .shadow(false)
+            .resizable(false)
+            .always_on_top(true)
+            .skip_taskbar(true)
+            .focused(false)
+            .visible(false)
+            // Must match the main window: WebView2 allows one profile per process.
+            .data_directory(data.0.join("webview"))
+            .build()
+            .map_err(err)?,
+    };
+    let _ = swatch.set_ignore_cursor_events(true);
+
+    let result = tauri::async_runtime::spawn_blocking({
+        let swatch = swatch.clone();
+        move || {
+            let tick = Duration::from_millis(16);
+            // The click on the eyedropper button itself must not count.
+            while left_button_down() {
+                std::thread::sleep(tick);
+            }
+            // SAFETY: screen DC (null window) is released before returning.
+            let dc = unsafe { GetDC(std::ptr::null_mut()) };
+            let deadline = Instant::now() + Duration::from_secs(60);
+            let mut last: Option<String> = None;
+            let mut last_pt = (i32::MIN, i32::MIN);
+            let result = loop {
+                if key_down(VK_ESCAPE) || Instant::now() > deadline {
+                    break None;
+                }
+                // Use the color sampled before the press: pressing can change hover visuals.
+                if left_button_down() {
+                    break last;
+                }
+                let mut pt = POINT { x: 0, y: 0 };
+                // SAFETY: `pt` is a valid out pointer; `dc` is the screen DC.
+                let color = unsafe {
+                    if GetCursorPos(&mut pt) == 0 {
+                        CLR_INVALID
+                    } else {
+                        GetPixel(dc, pt.x, pt.y)
+                    }
+                };
+                if (pt.x, pt.y) != last_pt {
+                    last_pt = (pt.x, pt.y);
+                    let _ = swatch.set_position(PhysicalPosition::new(pt.x + OFFSET, pt.y + OFFSET));
+                }
+                if color != CLR_INVALID {
+                    // COLORREF is 0x00BBGGRR.
+                    let hex = format!("#{:02x}{:02x}{:02x}", color & 0xff, (color >> 8) & 0xff, (color >> 16) & 0xff);
+                    if last.as_deref() != Some(hex.as_str()) {
+                        let _ = on_move.send(hex.clone());
+                        let _ = swatch.eval(format!("show('{hex}')"));
+                        if last.is_none() {
+                            let _ = swatch.show();
+                        }
+                        last = Some(hex);
+                    }
+                }
+                std::thread::sleep(tick);
+            };
+            // SAFETY: matches the GetDC above.
+            unsafe { ReleaseDC(std::ptr::null_mut(), dc) };
+            result
+        }
+    })
+    .await
+    .map_err(err);
+    // Destroy rather than hide: a hidden window would keep the app alive after the
+    // main window is closed.
+    let _ = swatch.destroy();
+    result
+}
+
+#[cfg(not(windows))]
+#[tauri::command]
+async fn pick_screen_color() -> Result<Option<String>, String> {
+    Err("Windows에서만 지원해요".into())
 }
 
 fn main() {
@@ -168,6 +352,7 @@ fn main() {
         .and_then(|exe| exe.parent().map(|p| p.join(format!("{APP_NAME}_data"))))
         .expect("cannot locate exe folder");
     fs::create_dir_all(&data).expect("cannot create data folder");
+    let _ = fs::remove_dir_all(data.join("drag"));
     // Handed to the page before main.js runs; parsed (and validated) there.
     let settings = fs::read_to_string(data.join("settings.json")).unwrap_or_default();
 
@@ -182,16 +367,20 @@ fn main() {
             delete_image,
             create_tab,
             delete_tab,
+            rename_tab,
             reveal_gallery,
-            copy_image
+            copy_image,
+            start_drag,
+            pick_screen_color
         ])
         .setup(move |app| {
             let webview_dir = data.join("webview");
             app.manage(DataDir(data));
             WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
                 .title(APP_NAME)
-                .inner_size(380.0, 540.0)
-                .min_inner_size(300.0, 320.0)
+                // 4 × 70px cells + 3 × 10px gaps + 2 × 12px padding + 6px scrollbar.
+                .inner_size(340.0, 320.0)
+                .min_inner_size(340.0, 320.0)
                 .disable_drag_drop_handler()
                 .data_directory(webview_dir)
                 .initialization_script(&format!("window.__SETTINGS__ = {settings:?};"))

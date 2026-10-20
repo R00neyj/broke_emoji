@@ -8,7 +8,7 @@ const { removeBackground, alphaBBox, fitBox } = window.imaging;
 const STORE_MAX = 360;
 const KAKAO_DEFAULT_BG = '#bacee0';
 
-const DEFAULTS = { bg: KAKAO_DEFAULT_BG, size: 150, pad: 4, removeBg: true, tol: 24, pinned: false, dir: '' };
+const DEFAULTS = { bg: KAKAO_DEFAULT_BG, size: 150, pad: 4, removeBg: true, tol: 24, pinned: false, dir: '', theme: 'system' };
 // settings.json next to the exe, injected by the backend before this script runs.
 const settings = { ...DEFAULTS, ...parseSettings(window.__SETTINGS__) };
 function parseSettings(text) {
@@ -36,13 +36,13 @@ const urls = new Map(); // "tab/name" -> object URL
 // ---------- toast / menu ----------
 
 let toastTimer;
-function toast(msg, isError) {
+function toast(msg, isError, ms) {
   const t = $('toast');
   t.textContent = msg;
   t.classList.toggle('error', !!isError);
   t.hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { t.hidden = true; }, isError ? 3500 : 1600);
+  toastTimer = setTimeout(() => { t.hidden = true; }, ms ?? (isError ? 3500 : 1600));
 }
 
 function showMenu(x, y, items) {
@@ -94,6 +94,14 @@ async function renderPacks() {
     b.onclick = () => { current = t.name; refresh(); };
     if (t.name) {
       b.oncontextmenu = (e) => showMenu(e.clientX, e.clientY, [
+        ['이름 변경', () => editTabName(b, t.name, async (name) => {
+          if (name === t.name) return;
+          await invoke('rename_tab', { from: t.name, to: name });
+          for (const [key, url] of urls) {
+            if (key.startsWith(t.name + '/')) { URL.revokeObjectURL(url); urls.delete(key); }
+          }
+          if (current === t.name) current = name;
+        })],
         ['탭 삭제 (빈 탭만)', () => run(async () => { await invoke('delete_tab', { name: t.name }); await refresh(); })],
       ]);
     }
@@ -101,24 +109,28 @@ async function renderPacks() {
   }
   const add = el('button', 'pack pack-add', '+');
   add.title = '탭 추가';
-  add.onclick = () => startNewTab(add);
+  add.onclick = () => editTabName(add, '', async (name) => {
+    await invoke('create_tab', { name });
+    current = name;
+  });
   nodes.push(add);
   nav.replaceChildren(...nodes);
 }
 
-function startNewTab(addBtn) {
+// Swaps `node` for an inline name input; Enter/blur submits, Escape cancels.
+function editTabName(node, initial, submit) {
   const input = el('input', 'pack-input');
   input.placeholder = '탭 이름';
-  addBtn.replaceWith(input);
+  input.value = initial;
+  node.replaceWith(input);
   input.focus();
+  input.select();
   let done = false;
   const finish = async (ok) => {
     if (done) return;
     done = true;
     const name = input.value.trim();
-    if (ok && name) {
-      await run(async () => { await invoke('create_tab', { name }); current = name; });
-    }
+    if (ok && name) await run(() => submit(name));
     await refresh();
   };
   input.onkeydown = (e) => {
@@ -141,7 +153,13 @@ async function renderGrid() {
     img.src = await imageUrl(tab.name, name);
     img.draggable = false;
     cell.append(img);
-    cell.onclick = () => run(() => copyImage(img, cell));
+    cell.onclick = () => {
+      if (dragged) return;
+      run(() => copyImage(img, cell));
+    };
+    cell.onpointerdown = (e) => {
+      if (e.button === 0) dragFrom = { x: e.clientX, y: e.clientY, img };
+    };
     cell.oncontextmenu = (e) => showMenu(e.clientX, e.clientY, [
       ['복사', () => run(() => copyImage(img, cell))],
       ['삭제', () => run(async () => {
@@ -164,11 +182,11 @@ async function run(fn) {
   }
 }
 
-// ---------- copy ----------
+// ---------- copy / drag out ----------
 
 // Composites the stored (transparent) image onto the chat background color so
 // KakaoTalk cannot add its own white/black backdrop.
-async function copyImage(img, cell) {
+function composite(img) {
   const size = settings.size;
   const c = document.createElement('canvas');
   c.width = c.height = size;
@@ -178,13 +196,41 @@ async function copyImage(img, cell) {
   ctx.imageSmoothingQuality = 'high';
   const r = fitBox(img.naturalWidth, img.naturalHeight, size, settings.pad);
   ctx.drawImage(img, r.x, r.y, r.w, r.h);
-  const { data } = ctx.getImageData(0, 0, size, size);
-  await invoke('copy_image', { width: size, height: size, rgba: Array.from(data) });
+  return c;
+}
+
+async function copyImage(img, cell) {
+  const c = composite(img);
+  const { data } = c.getContext('2d').getImageData(0, 0, c.width, c.height);
+  await invoke('copy_image', { width: c.width, height: c.height, rgba: Array.from(data) });
   cell.classList.remove('copied');
   void cell.offsetWidth;
   cell.classList.add('copied');
   toast('복사했어요 · 카톡에서 Ctrl+V');
 }
+
+// Dragging a cell out of the window starts a native file drag of the composited
+// PNG, which KakaoTalk accepts like a file dropped from Explorer.
+const DRAG_THRESHOLD = 6;
+let dragFrom = null; // pointer-down position on a cell
+let dragged = false; // suppresses the click (copy) that may follow a drag
+let draggingOut = false; // our own outgoing drag must not trigger import
+
+addEventListener('pointerdown', () => { dragged = false; draggingOut = false; }, true);
+addEventListener('pointerup', () => { dragFrom = null; });
+addEventListener('pointermove', (e) => {
+  if (!dragFrom || !(e.buttons & 1)) return;
+  if (Math.hypot(e.clientX - dragFrom.x, e.clientY - dragFrom.y) < DRAG_THRESHOLD) return;
+  const { img } = dragFrom;
+  dragFrom = null;
+  dragged = true;
+  draggingOut = true;
+  run(async () => {
+    const blob = await new Promise((res) => composite(img).toBlob(res, 'image/png'));
+    const png = Array.from(new Uint8Array(await blob.arrayBuffer()));
+    await invoke('start_drag', { png });
+  });
+});
 
 // ---------- import ----------
 
@@ -252,14 +298,15 @@ document.addEventListener('paste', (e) => {
 });
 
 let dragDepth = 0;
-addEventListener('dragenter', (e) => { e.preventDefault(); dragDepth++; $('drop').hidden = false; });
+addEventListener('dragenter', (e) => { e.preventDefault(); if (draggingOut) return; dragDepth++; $('drop').hidden = false; });
 addEventListener('dragleave', () => { if (--dragDepth <= 0) { dragDepth = 0; $('drop').hidden = true; } });
 addEventListener('dragover', (e) => e.preventDefault());
 addEventListener('drop', (e) => {
   e.preventDefault();
   dragDepth = 0;
   $('drop').hidden = true;
-  importBlobs([...e.dataTransfer.files]);
+  if (!draggingOut) importBlobs([...e.dataTransfer.files]);
+  draggingOut = false;
 });
 
 // ---------- pin ----------
@@ -275,13 +322,18 @@ $('btn-pin').onclick = () => run(() => setPinned(!settings.pinned));
 
 // ---------- settings ----------
 
+// Shows a color without saving it (eyedropper live preview).
+function showBg(hex) {
+  document.documentElement.style.setProperty('--chat-bg', hex);
+  $('set-bg').value = hex;
+  $('set-bg-hex').value = hex.toUpperCase();
+}
+
 function applyBg(hex) {
   if (!/^#[0-9a-f]{6}$/i.test(hex)) return;
   settings.bg = hex.toLowerCase();
   saveSettings();
-  document.documentElement.style.setProperty('--chat-bg', settings.bg);
-  $('set-bg').value = settings.bg;
-  $('set-bg-hex').value = settings.bg.toUpperCase();
+  showBg(settings.bg);
 }
 
 function bindNumber(id, key, min, max) {
@@ -303,21 +355,47 @@ $('set-bg-hex').onchange = (e) => {
   e.target.value = settings.bg.toUpperCase();
 };
 $('btn-bg-default').onclick = () => applyBg(KAKAO_DEFAULT_BG);
-if ('EyeDropper' in window) {
-  $('btn-eyedropper').onclick = async () => {
+let picking = false;
+$('btn-eyedropper').onclick = () => {
+  if (picking) return;
+  picking = true;
+  const onMove = new window.__TAURI__.core.Channel();
+  onMove.onmessage = showBg;
+  toast('색을 찍을 곳(카톡 채팅방 배경)을 클릭하세요 · Esc 취소', false, 60000);
+  run(async () => {
     try {
-      const { sRGBHex } = await new EyeDropper().open();
-      applyBg(sRGBHex);
-    } catch { /* cancelled */ }
-  };
-} else {
-  $('btn-eyedropper').hidden = true;
-}
+      const hex = await invoke('pick_screen_color', { onMove });
+      if (hex) {
+        applyBg(hex);
+        toast(`배경색을 ${hex.toUpperCase()}로 바꿨어요`);
+      } else {
+        showBg(settings.bg);
+        toast('스포이드를 취소했어요');
+      }
+    } finally {
+      picking = false;
+    }
+  });
+};
 bindNumber('set-size', 'size', 32, 1024);
 bindNumber('set-pad', 'pad', 0, 40);
 bindNumber('set-tol', 'tol', 0, 128);
 $('set-remove').checked = settings.removeBg;
 $('set-remove').onchange = (e) => { settings.removeBg = e.target.checked; saveSettings(); };
+
+// ---------- theme ----------
+
+const systemDark = matchMedia('(prefers-color-scheme: dark)');
+function applyTheme() {
+  const dark = settings.theme === 'dark' || (settings.theme === 'system' && systemDark.matches);
+  document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+  // Native title bar follows too (null = follow the OS).
+  appWindow.setTheme(settings.theme === 'system' ? null : settings.theme).catch(() => {});
+}
+systemDark.addEventListener('change', applyTheme);
+$('set-theme').value = settings.theme;
+$('set-theme').onchange = (e) => { settings.theme = e.target.value; saveSettings(); applyTheme(); };
+applyTheme();
 
 $('btn-dir-apply').onclick = () => run(async () => {
   const dir = await invoke('open_gallery', { dir: $('set-dir').value });

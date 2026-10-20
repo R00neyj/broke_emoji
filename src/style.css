@@ -16,31 +16,30 @@
   --accent: #4a6cf7;
   --accent-soft: #eef1fe;
   --overlay: rgba(255, 255, 255, .9);
-  color-scheme: light dark;
+  color-scheme: light;
   font-family: "Malgun Gothic", "맑은 고딕", system-ui, sans-serif;
   font-size: 13px;
   color: var(--fg);
 }
 
-/* Follows the OS theme (Windows "app mode"). */
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #1e1e1e;
-    --fg: #e8e8e8;
-    --line: #333;
-    --line-soft: #2a2a2a;
-    --muted: #8f8f8f;
-    --icon: #aaa;
-    --hover: #2c2c2c;
-    --field-border: #444;
-    --field-bg: #262626;
-    --button-bg: #2a2a2a;
-    --selected: #666;
-    --scroll: #555;
-    --accent: #7b93ff;
-    --accent-soft: #2a3150;
-    --overlay: rgba(30, 30, 30, .92);
-  }
+/* Set by main.js from the theme setting (system / light / dark). */
+:root[data-theme=dark] {
+  --bg: #1e1e1e;
+  --fg: #e8e8e8;
+  --line: #333;
+  --line-soft: #2a2a2a;
+  --muted: #8f8f8f;
+  --icon: #aaa;
+  --hover: #2c2c2c;
+  --field-border: #444;
+  --field-bg: #262626;
+  --button-bg: #2a2a2a;
+  --selected: #666;
+  --scroll: #555;
+  --accent: #7b93ff;
+  --accent-soft: #2a3150;
+  --overlay: rgba(30, 30, 30, .92);
+  color-scheme: dark;
 }
 
 * { box-sizing: border-box; }
@@ -136,11 +135,13 @@ button { font: inherit; color: inherit; cursor: pointer; }
   flex: 1;
   overflow-y: auto;
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  /* Same cell size as KakaoTalk's emoticon window (70px, 10px gap). */
+  grid-template-columns: repeat(auto-fill, 70px);
+  justify-content: center;
   /* Without this, auto rows shrink below the square cells' height and they overlap. */
   grid-auto-rows: max-content;
   align-content: start;
-  gap: 8px;
+  gap: 10px;
   padding: 12px;
 }
 .grid::-webkit-scrollbar { width: 6px; }
@@ -249,7 +250,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 #set-bg-hex { width: 76px; flex: none; }
 #set-bg { width: 34px; height: 26px; padding: 0; border: 1px solid var(--field-border); }
 
-input[type=text], input[type=number] {
+input[type=text], input[type=number], select {
   padding: 4px 6px;
   border: 1px solid var(--field-border);
   border-radius: 4px;
