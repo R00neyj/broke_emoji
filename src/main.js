@@ -8,7 +8,7 @@ const { removeBackground, alphaBBox, fitBox } = window.imaging;
 const STORE_MAX = 360;
 const KAKAO_DEFAULT_BG = '#bacee0';
 
-const DEFAULTS = { bg: KAKAO_DEFAULT_BG, size: 150, pad: 4, removeBg: true, tol: 24, pinned: false, dir: '', theme: 'system' };
+const DEFAULTS = { bg: KAKAO_DEFAULT_BG, size: 150, pad: 0, fit: 'contain', removeBg: true, tol: 24, pinned: false, dir: '', theme: 'system' };
 // settings.json next to the exe, injected by the backend before this script runs.
 const settings = { ...DEFAULTS, ...parseSettings(window.__SETTINGS__) };
 function parseSettings(text) {
@@ -19,7 +19,10 @@ function parseSettings(text) {
     return {};
   }
 }
-const saveSettings = () => invoke('save_settings', { json: JSON.stringify(settings, null, 2) }).catch((e) => toast(String(e), true));
+// Persists and tells the other window (gallery ⇄ settings) to re-sync.
+const saveSettings = () => invoke('save_settings', { json: JSON.stringify(settings, null, 2) })
+  .then(() => window.__TAURI__.event.emit('settings-changed', settings))
+  .catch((e) => toast(String(e), true));
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, text) => {
@@ -91,7 +94,7 @@ async function renderPacks() {
     } else {
       b.append(el('span', 'pack-text', (t.name || '기본').slice(0, 2)));
     }
-    b.onclick = () => { current = t.name; refresh(); };
+    b.onclick = () => { if (selection) endSelection(); current = t.name; refresh(); };
     if (t.name) {
       b.oncontextmenu = (e) => showMenu(e.clientX, e.clientY, [
         ['이름 변경', () => editTabName(b, t.name, async (name) => {
@@ -148,31 +151,218 @@ async function renderGrid() {
     return;
   }
   const cells = await Promise.all(tab.files.map(async (name) => {
-    const cell = el('button', 'cell');
+    const cell = el('button', 'cell' + (selection?.has(name) ? ' selected' : ''));
     const img = el('img');
     img.src = await imageUrl(tab.name, name);
     img.draggable = false;
     cell.append(img);
     cell.onclick = () => {
       if (dragged) return;
-      run(() => copyImage(img, cell));
+      if (selection) toggleSelected(name, cell);
+      else run(() => copyImage(img, cell));
     };
     cell.onpointerdown = (e) => {
-      if (e.button === 0) dragFrom = { x: e.clientX, y: e.clientY, img };
+      if (e.button !== 0) return;
+      if (!selection) dragFrom = { x: e.clientX, y: e.clientY, img };
+      clearTimeout(pressTimer);
+      pressTimer = setTimeout(() => {
+        if (selection) return;
+        // Long press: enter multi-select with this cell; swallow the click that follows.
+        dragFrom = null;
+        dragged = true;
+        selection = new Set();
+        toggleSelected(name, cell);
+      }, LONG_PRESS_MS);
     };
-    cell.oncontextmenu = (e) => showMenu(e.clientX, e.clientY, [
-      ['복사', () => run(() => copyImage(img, cell))],
-      ['삭제', () => run(async () => {
-        await invoke('delete_image', { tab: tab.name, name });
-        URL.revokeObjectURL(urls.get(tab.name + '/' + name));
-        urls.delete(tab.name + '/' + name);
-        await refresh();
-      })],
-    ]);
+    cell.oncontextmenu = (e) => {
+      if (selection) return;
+      showMenu(e.clientX, e.clientY, [
+        ['복사', () => run(() => copyImage(img, cell))],
+        ['자르기', () => openCropper(tab.name, name, img)],
+        ['여러 개 선택', () => { selection = new Set(); toggleSelected(name, cell); }],
+        ['삭제', () => run(() => deleteImages(tab.name, [name]))],
+      ]);
+    };
     return cell;
   }));
   grid.replaceChildren(...cells);
 }
+
+// ---------- multi-select (long press) ----------
+
+const LONG_PRESS_MS = 450;
+let pressTimer;
+let selection = null; // Set of file names in the current tab while selecting
+
+addEventListener('pointerup', () => clearTimeout(pressTimer));
+addEventListener('keydown', (e) => { if (e.key === 'Escape' && selection) endSelection(); });
+
+function toggleSelected(name, cell) {
+  if (selection.has(name)) selection.delete(name);
+  else selection.add(name);
+  cell.classList.toggle('selected', selection.has(name));
+  renderSelectBar();
+}
+
+function endSelection() {
+  selection = null;
+  $('selectbar').hidden = true;
+  document.querySelectorAll('.cell.selected').forEach((c) => c.classList.remove('selected'));
+}
+
+function renderSelectBar() {
+  $('selectbar').hidden = false;
+  $('sel-count').textContent = `${selection.size}개 선택`;
+  $('sel-move').disabled = $('sel-delete').disabled = selection.size === 0;
+}
+
+async function deleteImages(tab, names) {
+  for (const name of names) {
+    await invoke('delete_image', { tab, name });
+    URL.revokeObjectURL(urls.get(tab + '/' + name));
+    urls.delete(tab + '/' + name);
+  }
+  await refresh();
+}
+
+$('sel-done').onclick = endSelection;
+$('sel-all').onclick = () => {
+  const tab = tabs.find((t) => t.name === current);
+  const all = selection.size === tab.files.length;
+  selection = new Set(all ? [] : tab.files);
+  document.querySelectorAll('.cell').forEach((c, i) => c.classList.toggle('selected', selection.has(tab.files[i])));
+  renderSelectBar();
+};
+$('sel-delete').onclick = () => run(async () => {
+  const names = [...selection];
+  await deleteImages(current, names);
+  endSelection();
+  toast(`${names.length}개 삭제했어요`);
+});
+$('sel-move').onclick = (e) => {
+  e.stopPropagation();
+  const r = e.currentTarget.getBoundingClientRect();
+  const targets = tabs.filter((t) => t.name !== current);
+  if (!targets.length) { toast('옮길 다른 탭이 없어요. + 로 탭을 먼저 만드세요', true); return; }
+  showMenu(r.left, r.top - 8 - targets.length * 32, targets.map((t) => [`→ ${t.name || '기본'}`, () => run(async () => {
+    const names = [...selection];
+    for (const name of names) {
+      await invoke('move_image', { from: current, name, to: t.name });
+      URL.revokeObjectURL(urls.get(current + '/' + name));
+      urls.delete(current + '/' + name);
+    }
+    endSelection();
+    await refresh();
+    toast(`${names.length}개를 '${t.name || '기본'}' 탭으로 옮겼어요`);
+  })]));
+};
+
+// ---------- crop ----------
+
+// Crop rectangle in source-image pixels; the box on screen is derived from it.
+// The box may extend past the image inside a square "frame" of the image's long
+// side, so a wide/tall image can be squared without losing anything; the extra
+// area stays transparent and is filled with the chat background on copy.
+const crop = { tab: '', name: '', img: null, x: 0, y: 0, w: 0, h: 0, scale: 1, ox: 0, oy: 0, frame: null };
+const MIN_CROP = 8;
+
+function openCropper(tab, name, img) {
+  const iw = img.naturalWidth, ih = img.naturalHeight, side = Math.max(iw, ih);
+  const frame = { x: (iw - side) / 2, y: (ih - side) / 2, w: side, h: side };
+  Object.assign(crop, { tab, name, img, frame });
+  $('crop-img').src = img.src;
+  $('cropper').hidden = false;
+  // Default: the largest centered square that stays inside the image.
+  const inner = Math.min(iw, ih);
+  Object.assign(crop, { x: (iw - inner) / 2, y: (ih - inner) / 2, w: inner, h: inner });
+  if (!$('crop-square').checked) Object.assign(crop, { x: 0, y: 0, w: iw, h: ih });
+  layoutCrop();
+}
+
+function layoutCrop() {
+  const { img, frame } = crop;
+  const stage = $('crop-stage').getBoundingClientRect();
+  const scale = Math.min(stage.width, stage.height) / frame.w;
+  // Screen origin of image pixel (0,0), with the frame centered in the stage.
+  const ox = (stage.width - frame.w * scale) / 2 - frame.x * scale;
+  const oy = (stage.height - frame.h * scale) / 2 - frame.y * scale;
+  Object.assign(crop, { scale, ox, oy });
+  Object.assign($('crop-img').style, {
+    left: ox + 'px', top: oy + 'px',
+    width: img.naturalWidth * scale + 'px', height: img.naturalHeight * scale + 'px',
+  });
+  drawCropBox();
+}
+
+function drawCropBox() {
+  const s = crop.scale;
+  Object.assign($('crop-box').style, {
+    left: crop.ox + crop.x * s + 'px', top: crop.oy + crop.y * s + 'px',
+    width: crop.w * s + 'px', height: crop.h * s + 'px',
+  });
+}
+
+const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+
+$('crop-box').onpointerdown = (e) => {
+  e.preventDefault();
+  const box = $('crop-box');
+  box.setPointerCapture(e.pointerId);
+  const resizing = e.target.classList.contains('crop-handle');
+  const start = { px: e.clientX, py: e.clientY, x: crop.x, y: crop.y, w: crop.w, h: crop.h };
+  const f = crop.frame, right = f.x + f.w, bottom = f.y + f.h;
+  box.onpointermove = (m) => {
+    const dx = (m.clientX - start.px) / crop.scale, dy = (m.clientY - start.py) / crop.scale;
+    if (resizing) {
+      let w = clamp(start.w + dx, MIN_CROP, right - start.x);
+      let h = clamp(start.h + dy, MIN_CROP, bottom - start.y);
+      if ($('crop-square').checked) w = h = Math.min(Math.max(w, h), right - start.x, bottom - start.y);
+      Object.assign(crop, { w, h });
+    } else {
+      crop.x = clamp(start.x + dx, f.x, right - crop.w);
+      crop.y = clamp(start.y + dy, f.y, bottom - crop.h);
+    }
+    drawCropBox();
+  };
+  box.onpointerup = () => { box.onpointermove = box.onpointerup = null; };
+};
+
+$('crop-square').onchange = (e) => {
+  if (!e.target.checked) return;
+  const side = Math.min(crop.w, crop.h);
+  Object.assign(crop, { x: crop.x + (crop.w - side) / 2, y: crop.y + (crop.h - side) / 2, w: side, h: side });
+  drawCropBox();
+};
+
+addEventListener('resize', () => { if (!$('cropper').hidden) layoutCrop(); });
+addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('cropper').hidden) $('cropper').hidden = true; });
+$('crop-cancel').onclick = () => { $('cropper').hidden = true; };
+
+async function croppedPng() {
+  const x = Math.round(crop.x), y = Math.round(crop.y);
+  const w = Math.max(1, Math.round(crop.w)), h = Math.max(1, Math.round(crop.h));
+  const c = canvasOf(w, h);
+  // Areas of the box outside the image stay transparent.
+  c.getContext('2d').drawImage(crop.img, -x, -y);
+  const blob = await new Promise((res) => c.toBlob(res, 'image/png'));
+  return Array.from(new Uint8Array(await blob.arrayBuffer()));
+}
+
+$('crop-new').onclick = () => run(async () => {
+  await invoke('save_image', { tab: crop.tab, bytes: await croppedPng() });
+  $('cropper').hidden = true;
+  await refresh();
+  toast('잘라서 새 이미지로 저장했어요');
+});
+$('crop-overwrite').onclick = () => run(async () => {
+  await invoke('replace_image', { tab: crop.tab, name: crop.name, bytes: await croppedPng() });
+  const key = crop.tab + '/' + crop.name;
+  URL.revokeObjectURL(urls.get(key));
+  urls.delete(key);
+  $('cropper').hidden = true;
+  await refresh();
+  toast('잘라서 덮어썼어요');
+});
 
 async function run(fn) {
   try {
@@ -194,7 +384,13 @@ function composite(img) {
   ctx.fillStyle = settings.bg;
   ctx.fillRect(0, 0, size, size);
   ctx.imageSmoothingQuality = 'high';
-  const r = fitBox(img.naturalWidth, img.naturalHeight, size, settings.pad);
+  const cover = settings.fit === 'cover';
+  const r = fitBox(img.naturalWidth, img.naturalHeight, size, settings.pad, cover);
+  if (cover) {
+    ctx.beginPath();
+    ctx.rect(r.clip.x, r.clip.y, r.clip.w, r.clip.h);
+    ctx.clip();
+  }
   ctx.drawImage(img, r.x, r.y, r.w, r.h);
   return c;
 }
@@ -222,6 +418,7 @@ addEventListener('pointermove', (e) => {
   if (!dragFrom || !(e.buttons & 1)) return;
   if (Math.hypot(e.clientX - dragFrom.x, e.clientY - dragFrom.y) < DRAG_THRESHOLD) return;
   const { img } = dragFrom;
+  clearTimeout(pressTimer);
   dragFrom = null;
   dragged = true;
   draggingOut = true;
@@ -334,6 +531,7 @@ function applyBg(hex) {
   settings.bg = hex.toLowerCase();
   saveSettings();
   showBg(settings.bg);
+  markPreset();
 }
 
 function bindNumber(id, key, min, max) {
@@ -354,7 +552,25 @@ $('set-bg-hex').onchange = (e) => {
   applyBg(v.startsWith('#') ? v : '#' + v);
   e.target.value = settings.bg.toUpperCase();
 };
-$('btn-bg-default').onclick = () => applyBg(KAKAO_DEFAULT_BG);
+
+// KakaoTalk's built-in chat background colors (채팅방 설정 → 배경화면 → 색상).
+const KAKAO_BG_PRESETS = [
+  '#bacee0', '#677bac', '#9dcdb8', '#51a5a0', '#9bb157',
+  '#f8cd59', '#f99460', '#f68181', '#f7a2bd', '#5b4d49',
+  '#d3d5d0', '#525252', '#404372', '#10374a', '#818b9c',
+];
+$('bg-presets').replaceChildren(...KAKAO_BG_PRESETS.map((hex) => {
+  const b = el('button', 'preset');
+  b.type = 'button';
+  b.title = hex.toUpperCase();
+  b.style.background = hex;
+  b.dataset.hex = hex;
+  b.onclick = () => applyBg(hex);
+  return b;
+}));
+function markPreset() {
+  document.querySelectorAll('.preset').forEach((b) => b.classList.toggle('on', b.dataset.hex === settings.bg));
+}
 let picking = false;
 $('btn-eyedropper').onclick = () => {
   if (picking) return;
@@ -382,6 +598,11 @@ bindNumber('set-pad', 'pad', 0, 40);
 bindNumber('set-tol', 'tol', 0, 128);
 $('set-remove').checked = settings.removeBg;
 $('set-remove').onchange = (e) => { settings.removeBg = e.target.checked; saveSettings(); };
+$('set-fit').value = settings.fit;
+$('set-fit').onchange = (e) => { settings.fit = e.target.value; saveSettings(); applyFit(); };
+// Gallery preview mirrors what gets copied.
+function applyFit() { document.documentElement.style.setProperty('--fit', settings.fit); }
+applyFit();
 
 // ---------- theme ----------
 
@@ -402,22 +623,56 @@ $('btn-dir-apply').onclick = () => run(async () => {
   settings.dir = dir;
   saveSettings();
   $('set-dir').value = dir;
-  urls.forEach((u) => URL.revokeObjectURL(u));
-  urls.clear();
-  current = '';
-  await refresh();
+  // The gallery window reloads on the settings-changed event.
   toast('갤러리 폴더를 바꿨어요');
 });
 $('btn-dir-open').onclick = () => run(() => invoke('reveal_gallery'));
 
-$('btn-settings').onclick = () => { $('settings').hidden = !$('settings').hidden; };
-$('btn-settings-close').onclick = () => { $('settings').hidden = true; };
+// ---------- settings window ----------
+
+// The same page runs in a separate "settings" window (window.__MODE__ set by the
+// backend). Both windows share settings.json and sync through this event.
+const SETTINGS_MODE = window.__MODE__ === 'settings';
+const { listen } = window.__TAURI__.event;
+
+function syncFromSettings() {
+  showBg(settings.bg);
+  markPreset();
+  document.documentElement.style.setProperty('--pad', settings.pad + '%');
+  for (const k of ['size', 'pad', 'tol']) $('set-' + k).value = settings[k];
+  $('set-remove').checked = settings.removeBg;
+  $('set-fit').value = settings.fit;
+  $('set-theme').value = settings.theme;
+  applyFit();
+  applyTheme();
+}
+
+listen('settings-changed', ({ payload }) => {
+  const dirChanged = payload.dir !== settings.dir;
+  Object.assign(settings, payload);
+  syncFromSettings();
+  if (SETTINGS_MODE) return;
+  $('btn-pin').classList.toggle('on', settings.pinned);
+  if (dirChanged) {
+    urls.forEach((u) => URL.revokeObjectURL(u));
+    urls.clear();
+    current = '';
+    run(refresh);
+  }
+});
+
+$('btn-settings').onclick = () => run(() => invoke('open_settings'));
 
 // ---------- start ----------
 
 (async () => {
-  applyBg(settings.bg);
-  document.documentElement.style.setProperty('--pad', settings.pad + '%');
+  syncFromSettings();
+  if (SETTINGS_MODE) {
+    document.body.classList.add('settings-mode');
+    $('settings').hidden = false;
+    $('set-dir').value = settings.dir || 'gallery';
+    return;
+  }
   await run(async () => {
     let dir;
     try {

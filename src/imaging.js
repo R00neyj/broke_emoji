@@ -141,14 +141,18 @@
   }
 
   // Placement of a w×h image centered in a size×size canvas with `pad`% margin per side.
-  // Aspect ratio is always preserved (never stretched).
-  function fitBox(w, h, size, pad) {
+  // Aspect ratio is always preserved (never stretched). `cover` scales the image to
+  // fill the padded square (center crop); the caller clips to `clip`.
+  function fitBox(w, h, size, pad, cover) {
     const margin = Math.round(size * pad / 100);
     const box = Math.max(1, size - 2 * margin);
-    const s = Math.min(box / w, box / h);
+    const s = (cover ? Math.max : Math.min)(box / w, box / h);
     const dw = Math.max(1, Math.round(w * s));
     const dh = Math.max(1, Math.round(h * s));
-    return { x: Math.floor((size - dw) / 2), y: Math.floor((size - dh) / 2), w: dw, h: dh };
+    return {
+      x: Math.floor((size - dw) / 2), y: Math.floor((size - dh) / 2), w: dw, h: dh,
+      clip: { x: margin, y: margin, w: box, h: box },
+    };
   }
 
   exports.removeBackground = removeBackground;

@@ -1,6 +1,6 @@
 :root {
   --chat-bg: #bacee0;
-  --pad: 4%;
+  --pad: 0%;
   --bg: #fff;
   --fg: #222;
   --line: #e6e6e6;
@@ -165,11 +165,26 @@ button { font: inherit; color: inherit; cursor: pointer; }
   inset: var(--pad);
   width: calc(100% - 2 * var(--pad));
   height: calc(100% - 2 * var(--pad));
-  object-fit: contain;
+  object-fit: var(--fit, contain);
   pointer-events: none;
 }
 .cell.copied { animation: flash .5s; }
 @keyframes flash { from { outline: 3px solid var(--accent); } to { outline: 3px solid transparent; } }
+.cell.selected { outline: 3px solid var(--accent); outline-offset: -3px; }
+.cell.selected::after {
+  content: "✓";
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  font-size: 12px;
+  line-height: 18px;
+  text-align: center;
+}
 
 .empty {
   grid-column: 1 / -1;
@@ -196,6 +211,36 @@ button { font: inherit; color: inherit; cursor: pointer; }
 }
 .toast.error { background: #d9534f; }
 
+/* Multi-select actions; replaces the bottom area while selecting. */
+.selectbar {
+  position: fixed;
+  left: 8px;
+  right: 8px;
+  bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 6px 6px 12px;
+  border: 1px solid var(--field-border);
+  border-radius: 8px;
+  background: var(--bg);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, .15);
+  z-index: 5;
+}
+.selectbar span { flex: 1; color: var(--muted); }
+.selectbar button {
+  padding: 5px 10px;
+  border: 1px solid var(--field-border);
+  border-radius: 6px;
+  background: var(--button-bg);
+}
+.selectbar button:disabled { opacity: .4; cursor: default; }
+.selectbar .danger { color: #d9534f; }
+.selectbar .primary { background: var(--fg); border-color: var(--fg); color: var(--bg); }
+body:has(.selectbar:not([hidden])) .grid { padding-bottom: 60px; }
+.toast { z-index: 6; pointer-events: none; }
+body:has(.selectbar:not([hidden])) .toast { bottom: 60px; }
+
 .menu {
   position: fixed;
   min-width: 120px;
@@ -208,6 +253,53 @@ button { font: inherit; color: inherit; cursor: pointer; }
 }
 .menu button { display: block; width: 100%; padding: 7px 14px; border: 0; background: none; text-align: left; }
 .menu button:hover { background: var(--hover); }
+
+/* ---------- crop ---------- */
+
+.cropper {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  z-index: 15;
+}
+.crop-stage { position: relative; flex: 1; margin: 12px; overflow: hidden; }
+.crop-stage img { position: absolute; user-select: none; pointer-events: none; }
+.crop-box {
+  position: absolute;
+  border: 2px solid #fff;
+  /* Dims everything outside the crop area. */
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, .55);
+  cursor: move;
+  touch-action: none;
+}
+.crop-handle {
+  position: absolute;
+  right: -8px;
+  bottom: -8px;
+  width: 16px;
+  height: 16px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: nwse-resize;
+}
+.crop-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 10px;
+  border-top: 1px solid var(--line);
+}
+.crop-bar .spacer { flex: 1; }
+.crop-bar button {
+  padding: 5px 10px;
+  border: 1px solid var(--field-border);
+  border-radius: 6px;
+  background: var(--button-bg);
+}
+.crop-bar .primary { background: var(--fg); border-color: var(--fg); color: var(--bg); }
 
 .drop {
   position: fixed;
@@ -267,14 +359,17 @@ input[type=text], input[type=number], select {
 }
 
 .hint { margin: 4px 0 8px; color: var(--muted); font-size: 12px; }
-.link { padding: 0; border: 0; background: none; color: var(--accent); text-decoration: underline; font-size: 12px; }
 
-.settings button.primary {
-  display: block;
-  width: 100%;
-  margin-top: 16px;
-  padding: 8px;
-  background: var(--fg);
-  border-color: var(--fg);
-  color: var(--bg);
+.presets { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; padding: 10px 0 4px; }
+/* Beats the generic `.settings button` styling. */
+.settings .presets button.preset {
+  aspect-ratio: 1;
+  border: 1px solid rgba(0, 0, 0, .12);
+  border-radius: 50%;
+  padding: 0;
 }
+.settings .presets button.preset.on { outline: 2px solid var(--fg); outline-offset: 2px; }
+
+/* Separate settings window: only the settings panel, laid out as the page. */
+.settings-mode .top, .settings-mode .packs, .settings-mode .grid, .settings-mode .selectbar { display: none; }
+.settings-mode .settings { position: static; flex: 1; }

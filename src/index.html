@@ -27,6 +27,13 @@
   <main id="grid" class="grid"></main>
 
   <div id="toast" class="toast" hidden></div>
+  <div id="selectbar" class="selectbar" hidden>
+    <span id="sel-count"></span>
+    <button id="sel-all" type="button">전체</button>
+    <button id="sel-move" type="button">이동</button>
+    <button id="sel-delete" type="button" class="danger">삭제</button>
+    <button id="sel-done" type="button" class="primary">완료</button>
+  </div>
 
   <section id="settings" class="settings" hidden>
     <h2>설정</h2>
@@ -46,9 +53,17 @@
         <button id="btn-eyedropper" type="button" title="화면에서 색 찍기">스포이드</button>
       </span>
     </label>
-    <p class="hint">카톡 채팅방 배경색과 같게 맞추면 이모티콘처럼 보여요. <button id="btn-bg-default" type="button" class="link">카톡 기본(#BACEE0)</button></p>
+    <div id="bg-presets" class="presets" aria-label="카톡 배경색 프리셋"></div>
+    <p class="hint">카톡 채팅방 배경색과 같게 맞추면 이모티콘처럼 보여요. 사진 배경이면 스포이드로 찍으세요.</p>
     <label class="row"><span>출력 크기(px)</span><input id="set-size" type="number" min="32" max="1024" step="1"></label>
     <label class="row"><span>여백(%)</span><input id="set-pad" type="number" min="0" max="40" step="1"></label>
+    <label class="row">
+      <span>이미지 맞춤</span>
+      <select id="set-fit">
+        <option value="contain">전체 보이기 (여백 채움)</option>
+        <option value="cover">정사각형으로 자르기</option>
+      </select>
+    </label>
     <label class="row"><span>추가할 때 배경 제거</span><input id="set-remove" type="checkbox"></label>
     <label class="row"><span>배경 제거 허용 오차</span><input id="set-tol" type="number" min="0" max="128" step="1"></label>
     <label class="row col">
@@ -59,7 +74,20 @@
         <button id="btn-dir-open" type="button">열기</button>
       </span>
     </label>
-    <button id="btn-settings-close" type="button" class="primary">닫기</button>
+  </section>
+
+  <section id="cropper" class="cropper" hidden>
+    <div id="crop-stage" class="crop-stage">
+      <img id="crop-img" alt="">
+      <div id="crop-box" class="crop-box"><div class="crop-handle"></div></div>
+    </div>
+    <div class="crop-bar">
+      <label><input id="crop-square" type="checkbox" checked> 정사각형</label>
+      <span class="spacer"></span>
+      <button id="crop-cancel" type="button">취소</button>
+      <button id="crop-new" type="button">새로 저장</button>
+      <button id="crop-overwrite" type="button" class="primary">덮어쓰기</button>
+    </div>
   </section>
 
   <div id="menu" class="menu" hidden></div>

@@ -143,6 +143,31 @@ fn delete_image(state: State<Gallery>, tab: String, name: String) -> Result<(), 
     fs::remove_file(tab_dir(root(&state), &tab)?.join(plain(&name)?)).map_err(err)
 }
 
+/// Overwrites an existing image (crop "덮어쓰기").
+#[tauri::command]
+fn replace_image(state: State<Gallery>, tab: String, name: String, bytes: Vec<u8>) -> Result<(), String> {
+    let path = tab_dir(root(&state), &tab)?.join(plain(&name)?);
+    if !path.is_file() {
+        return Err("원본 이미지가 없어요".into());
+    }
+    fs::write(path, bytes).map_err(err)
+}
+
+/// Moves an image to another tab, renaming it if the name is taken there.
+#[tauri::command]
+fn move_image(state: State<Gallery>, from: String, name: String, to: String) -> Result<(), String> {
+    let root = root(&state);
+    let src = tab_dir(root.clone(), &from)?.join(plain(&name)?);
+    let dir = tab_dir(root, &to)?;
+    let mut dest = dir.join(&name);
+    let mut stamp = SystemTime::now().duration_since(UNIX_EPOCH).map_err(err)?.as_millis();
+    while dest.exists() {
+        dest = dir.join(format!("{stamp}.png"));
+        stamp += 1;
+    }
+    fs::rename(src, dest).map_err(err)
+}
+
 #[tauri::command]
 fn create_tab(state: State<Gallery>, name: String) -> Result<(), String> {
     fs::create_dir(root(&state).join(plain(name.trim())?)).map_err(err)
@@ -346,6 +371,33 @@ async fn pick_screen_color() -> Result<Option<String>, String> {
     Err("Windows에서만 지원해요".into())
 }
 
+/// Opens (or focuses) the separate settings window. It loads the same page in
+/// settings mode with the current settings.json; the windows sync via events.
+#[tauri::command]
+async fn open_settings(app: tauri::AppHandle, data: State<'_, DataDir>) -> Result<(), String> {
+    if let Some(w) = app.get_webview_window("settings") {
+        let _ = w.unminimize();
+        return w.set_focus().map_err(err);
+    }
+    let settings = fs::read_to_string(data.0.join("settings.json")).unwrap_or_default();
+    let mut builder = WebviewWindowBuilder::new(&app, "settings", WebviewUrl::default());
+    // Owned by the gallery window so it stays above it even when the gallery is pinned.
+    if let Some(main) = app.get_webview_window("main") {
+        builder = builder.parent(&main).map_err(err)?;
+    }
+    builder
+        .title(format!("{APP_NAME} 설정"))
+        .inner_size(360.0, 620.0)
+        .min_inner_size(320.0, 400.0)
+        .disable_drag_drop_handler()
+        // Must match the main window: WebView2 allows one profile per process.
+        .data_directory(data.0.join("webview"))
+        .initialization_script(&format!("window.__SETTINGS__ = {settings:?}; window.__MODE__ = 'settings';"))
+        .build()
+        .map(|_| ())
+        .map_err(err)
+}
+
 fn main() {
     let data = std::env::current_exe()
         .ok()
@@ -367,16 +419,19 @@ fn main() {
             delete_image,
             create_tab,
             delete_tab,
+            move_image,
+            replace_image,
             rename_tab,
             reveal_gallery,
             copy_image,
             start_drag,
-            pick_screen_color
+            pick_screen_color,
+            open_settings
         ])
         .setup(move |app| {
             let webview_dir = data.join("webview");
             app.manage(DataDir(data));
-            WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
+            let main_window = WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
                 .title(APP_NAME)
                 // 4 × 70px cells + 3 × 10px gaps + 2 × 12px padding + 6px scrollbar.
                 .inner_size(340.0, 320.0)
@@ -385,6 +440,13 @@ fn main() {
                 .data_directory(webview_dir)
                 .initialization_script(&format!("window.__SETTINGS__ = {settings:?};"))
                 .build()?;
+            // Closing the gallery quits the app even if the settings window is open.
+            let handle = app.handle().clone();
+            main_window.on_window_event(move |e| {
+                if let tauri::WindowEvent::Destroyed = e {
+                    handle.exit(0);
+                }
+            });
             Ok(())
         })
         .run(tauri::generate_context!())

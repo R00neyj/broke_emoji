@@ -35,7 +35,8 @@ Core flow:
 | Item | Value | Status |
 | --- | --- | --- |
 | Reference size | 360×360 | KakaoTalk spec |
-| Output canvas | Square, default 150×150, padding 4% (user setting) | Needs calibration |
+| Output canvas | Square, default 150×150, padding 0% (user setting) | Needs calibration |
+| Image fit | Contain (default, whole image + background padding) or cover (center-cropped square); global setting | Decided |
 | Background | Opaque, user's chat background color (default `#BACEE0`) | Decided |
 | Format | Stored: transparent PNG. Clipboard: opaque bitmap | Decided |
 
@@ -48,6 +49,9 @@ Core flow:
 - **Window:** small, resizable; default and minimum 340×320 (fits 4 columns). Gallery cells are fixed at 70px with 10px gaps, matching KakaoTalk's emoticon window; wider windows add columns. A pin button toggles always-on-top.
 - **Theme:** setting with System (default, follows the OS light/dark mode live), Light, Dark. Applied as `data-theme` on `<html>` plus the native title bar. Colors live as CSS variables in `:root`; never hardcode UI colors.
 - **Drag out:** dragging a cell out of the window starts a native file drag (crate `drag`) of the composited PNG written to `<data>/drag/`, so it can be dropped into a KakaoTalk chat. That folder is cleared on app start, not per drag, because the drop target may read the file later.
+- **Multi-select:** long-press a cell (or right-click → 여러 개 선택) to enter selection mode; clicks toggle, the bottom bar offers select all / move to tab / delete / done, Esc exits.
+- **Crop:** right-click → 자르기 opens a crop view (drag to move, corner handle to resize, square lock on by default). The box may extend past the image up to a square of the image's long side; that area stays transparent and gets the chat background on copy. "새로 저장" adds the crop as a new image; "덮어쓰기" replaces the stored PNG (irreversible).
+- **Settings window:** the gear opens a separate window (same page, `window.__MODE__ = 'settings'`, owned by the gallery window). Both windows write `settings.json` and sync via the `settings-changed` event; closing the gallery quits the app. Background presets are KakaoTalk's 15 built-in chat colors.
 
 ## Build
 
