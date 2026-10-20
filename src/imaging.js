@@ -107,9 +107,11 @@
   // white background) has no outline there, so the edge flood leaks into it and
   // erases its inside. Looked at with every gap narrower than `r` closed, the
   // real background wraps around the subject and touches two or more sides,
-  // while such an inside is a large area touching one side only. If both show
-  // up, each flooded pixel goes to whichever of them is closer (geodesic), and
-  // the inside's share is kept. Mutates `isBg`.
+  // while such an inside touches one side only. Each flooded pixel goes to the
+  // closest of these areas (geodesic), so parts walled off by narrow necks
+  // (face above a chest) join the area they hang off. A one-side area that ends
+  // up large is the subject's inside and is kept; small ones (gap between legs)
+  // stay background. Mutates `isBg`.
   function keepCutOffInside(W, H, near, isBg) {
     const N = W * H;
     const r = Math.max(2, Math.round(Math.max(W, H) * 0.04));
@@ -132,43 +134,64 @@
       each(p, (q) => { if (far[q] > far[p] + 1) { far[q] = far[p] + 1; queue[tail++] = q; } });
     }
 
-    // Components of the flooded area away from any subject pixel.
+    // Components of the flooded area away from any subject pixel. Those touching
+    // a side seed the growth below; the rest are left for it to claim.
     const sideOf = (p) => {
       const x = p % W, y = (p - x) / W;
       return (y === 0 ? 1 : 0) | (y === H - 1 ? 2 : 0) | (x === 0 ? 4 : 0) | (x === W - 1 ? 8 : 0);
     };
     const sideCount = (m) => (m & 1) + ((m >> 1) & 1) + ((m >> 2) & 1) + ((m >> 3) & 1);
-    const owner = new Uint8Array(N); // 1 = background, 2 = inside of the subject
-    const comp = new Int32Array(N);
-    let k = 0, hasBg = false, hasInside = false;
+    const owner = new Int32Array(N); // seed component id, 0 = unclaimed
+    const seen = new Uint8Array(N);
+    const oneSide = [false]; // per component id
+    let hasBg = false, hasInside = false;
     tail = 0;
     for (let p = 0; p < N; p++) {
-      if (!isBg[p] || far[p] <= r || comp[p]) continue;
-      k++;
+      if (!isBg[p] || far[p] <= r || seen[p]) continue;
+      const k = oneSide.length;
       const start = tail;
       let sides = 0;
-      comp[p] = k;
+      owner[p] = k;
+      seen[p] = 1;
       queue[tail++] = p;
       for (let i = start; i < tail; i++) {
         sides |= sideOf(queue[i]);
-        each(queue[i], (q) => { if (isBg[q] && far[q] > r && !comp[q]) { comp[q] = k; queue[tail++] = q; } });
+        each(queue[i], (q) => { if (isBg[q] && far[q] > r && !seen[q]) { seen[q] = 1; owner[q] = k; queue[tail++] = q; } });
       }
       const n = sideCount(sides);
-      const label = n >= 2 ? 1 : n === 1 && tail - start >= N * 0.1 ? 2 : 0;
-      if (label === 1) hasBg = true;
-      if (label === 2) hasInside = true;
-      if (label) for (let i = start; i < tail; i++) owner[queue[i]] = label;
-      else tail = start; // unlabeled: left for the expansion below
+      oneSide.push(n === 1);
+      if (n >= 2) hasBg = true;
+      if (n === 1) hasInside = true;
+      if (!n) {
+        for (let i = start; i < tail; i++) owner[queue[i]] = 0;
+        tail = start;
+      }
     }
     if (!hasBg || !hasInside) return;
 
-    // Grow both labels through the flooded area at the same pace.
+    // Grow all seeds through the flooded area at the same pace.
     head = 0;
     while (head < tail) {
       const p = queue[head++];
       each(p, (q) => { if (isBg[q] && !owner[q]) { owner[q] = owner[p]; queue[tail++] = q; } });
     }
-    for (let p = 0; p < N; p++) if (owner[p] === 2) isBg[p] = 0;
+    // One-side areas that meet (a chest split by fur strokes) form one inside.
+    const root = oneSide.map((_, k) => k);
+    const find = (k) => { while (root[k] !== k) k = root[k] = root[root[k]]; return k; };
+    const join = (a, b) => {
+      if (a && b && a !== b && oneSide[a] && oneSide[b]) root[find(a)] = find(b);
+    };
+    for (let p = 0; p < N; p++) {
+      if (!owner[p]) continue;
+      if (p % W < W - 1) join(owner[p], owner[p + 1]);
+      if (p < N - W) join(owner[p], owner[p + W]);
+    }
+    const size = new Int32Array(oneSide.length);
+    for (let p = 0; p < N; p++) if (owner[p]) size[find(owner[p])]++;
+    for (let p = 0; p < N; p++) {
+      const k = owner[p];
+      if (k && oneSide[k] && size[find(k)] >= N * 0.1) isBg[p] = 0;
+    }
   }
 
   // Makes the `isBg` pixels transparent. Anti-aliased rim: pixels touching the
