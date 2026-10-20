@@ -274,17 +274,33 @@ body:has(.selectbar:not([hidden])) .toast { bottom: 60px; }
   cursor: move;
   touch-action: none;
 }
-.crop-handle {
+/* Edges are invisible full-length strips; corners are hit squares showing an
+   L-shaped bracket just outside the 2px border. Corners sit above the strips. */
+.crop-handle { position: absolute; }
+.crop-handle[data-dir=n], .crop-handle[data-dir=s] { left: 12px; right: 12px; height: 12px; cursor: ns-resize; }
+.crop-handle[data-dir=w], .crop-handle[data-dir=e] { top: 12px; bottom: 12px; width: 12px; cursor: ew-resize; }
+.crop-handle[data-dir=n] { top: -7px; }
+.crop-handle[data-dir=s] { bottom: -7px; }
+.crop-handle[data-dir=w] { left: -7px; }
+.crop-handle[data-dir=e] { right: -7px; }
+.crop-handle[data-dir=nw], .crop-handle[data-dir=ne],
+.crop-handle[data-dir=sw], .crop-handle[data-dir=se] { width: 24px; height: 24px; z-index: 1; }
+.crop-handle[data-dir=nw] { left: -12px; top: -12px; cursor: nwse-resize; }
+.crop-handle[data-dir=se] { right: -12px; bottom: -12px; cursor: nwse-resize; }
+.crop-handle[data-dir=ne] { right: -12px; top: -12px; cursor: nesw-resize; }
+.crop-handle[data-dir=sw] { left: -12px; bottom: -12px; cursor: nesw-resize; }
+.crop-handle[data-dir=nw]::after, .crop-handle[data-dir=ne]::after,
+.crop-handle[data-dir=sw]::after, .crop-handle[data-dir=se]::after {
+  content: '';
   position: absolute;
-  right: -8px;
-  bottom: -8px;
   width: 16px;
   height: 16px;
-  border: 2px solid #fff;
-  border-radius: 50%;
-  background: var(--accent);
-  cursor: nwse-resize;
+  border: 0 solid #fff;
 }
+.crop-handle[data-dir=nw]::after { left: 7px; top: 7px; border-width: 4px 0 0 4px; }
+.crop-handle[data-dir=ne]::after { right: 7px; top: 7px; border-width: 4px 4px 0 0; }
+.crop-handle[data-dir=sw]::after { left: 7px; bottom: 7px; border-width: 0 0 4px 4px; }
+.crop-handle[data-dir=se]::after { right: 7px; bottom: 7px; border-width: 0 4px 4px 0; }
 .crop-bar {
   display: flex;
   align-items: center;

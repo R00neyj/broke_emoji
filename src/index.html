@@ -80,7 +80,16 @@
   <section id="cropper" class="cropper" hidden>
     <div id="crop-stage" class="crop-stage">
       <img id="crop-img" alt="">
-      <div id="crop-box" class="crop-box"><div class="crop-handle"></div></div>
+      <div id="crop-box" class="crop-box">
+        <div class="crop-handle" data-dir="n"></div>
+        <div class="crop-handle" data-dir="s"></div>
+        <div class="crop-handle" data-dir="w"></div>
+        <div class="crop-handle" data-dir="e"></div>
+        <div class="crop-handle" data-dir="nw"></div>
+        <div class="crop-handle" data-dir="ne"></div>
+        <div class="crop-handle" data-dir="sw"></div>
+        <div class="crop-handle" data-dir="se"></div>
+      </div>
     </div>
     <div class="crop-bar">
       <label><input id="crop-square" type="checkbox" checked> 정사각형</label>

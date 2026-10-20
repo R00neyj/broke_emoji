@@ -316,10 +316,13 @@ function openCropper(tab, name, img) {
   layoutCrop();
 }
 
+// Room around the frame so handles on its edge are not clipped by the stage.
+const CROP_INSET = 12;
+
 function layoutCrop() {
   const { img, frame } = crop;
   const stage = $('crop-stage').getBoundingClientRect();
-  const scale = Math.min(stage.width, stage.height) / frame.w;
+  const scale = Math.max(1, Math.min(stage.width, stage.height) - 2 * CROP_INSET) / frame.w;
   // Screen origin of image pixel (0,0), with the frame centered in the stage.
   const ox = (stage.width - frame.w * scale) / 2 - frame.x * scale;
   const oy = (stage.height - frame.h * scale) / 2 - frame.y * scale;
@@ -341,20 +344,45 @@ function drawCropBox() {
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
+// Resizes by the dragged handle (`dir`: "n", "se", ...); the opposite edges stay put.
+// With the square lock, an edge handle keeps the box centered on the other axis,
+// shifting it as needed so it can still grow to the full frame.
+function resizeCrop(start, dir, dx, dy) {
+  const f = crop.frame, fr = f.x + f.w, fb = f.y + f.h;
+  const W = dir.includes('w'), E = dir.includes('e'), N = dir.includes('n'), S = dir.includes('s');
+  let l = start.x, t = start.y, r = start.x + start.w, b = start.y + start.h;
+  if (W) l = clamp(l + dx, f.x, r - MIN_CROP);
+  if (E) r = clamp(r + dx, l + MIN_CROP, fr);
+  if (N) t = clamp(t + dy, f.y, b - MIN_CROP);
+  if (S) b = clamp(b + dy, t + MIN_CROP, fb);
+  if ($('crop-square').checked) {
+    const horiz = W || E, vert = N || S;
+    // Room from the fixed edges toward the dragged ones.
+    const roomX = W ? r - f.x : E ? fr - l : f.w;
+    const roomY = N ? b - f.y : S ? fb - t : f.h;
+    const want = horiz && vert ? Math.max(r - l, b - t) : horiz ? r - l : b - t;
+    const side = clamp(want, MIN_CROP, Math.min(roomX, roomY));
+    if (W) l = r - side;
+    else if (E) r = l + side;
+    else { l = clamp((l + r - side) / 2, f.x, fr - side); r = l + side; }
+    if (N) t = b - side;
+    else if (S) b = t + side;
+    else { t = clamp((t + b - side) / 2, f.y, fb - side); b = t + side; }
+  }
+  Object.assign(crop, { x: l, y: t, w: r - l, h: b - t });
+}
+
 $('crop-box').onpointerdown = (e) => {
   e.preventDefault();
   const box = $('crop-box');
   box.setPointerCapture(e.pointerId);
-  const resizing = e.target.classList.contains('crop-handle');
+  const dir = e.target.closest('.crop-handle')?.dataset.dir;
   const start = { px: e.clientX, py: e.clientY, x: crop.x, y: crop.y, w: crop.w, h: crop.h };
   const f = crop.frame, right = f.x + f.w, bottom = f.y + f.h;
   box.onpointermove = (m) => {
     const dx = (m.clientX - start.px) / crop.scale, dy = (m.clientY - start.py) / crop.scale;
-    if (resizing) {
-      let w = clamp(start.w + dx, MIN_CROP, right - start.x);
-      let h = clamp(start.h + dy, MIN_CROP, bottom - start.y);
-      if ($('crop-square').checked) w = h = Math.min(Math.max(w, h), right - start.x, bottom - start.y);
-      Object.assign(crop, { w, h });
+    if (dir) {
+      resizeCrop(start, dir, dx, dy);
     } else {
       crop.x = clamp(start.x + dx, f.x, right - crop.w);
       crop.y = clamp(start.y + dy, f.y, bottom - crop.h);
