@@ -8,7 +8,7 @@ const { removeBackground, eraseAt, alphaBBox, fitBox } = window.imaging;
 const STORE_MAX = 360;
 const KAKAO_DEFAULT_BG = '#bacee0';
 
-const DEFAULTS = { bg: KAKAO_DEFAULT_BG, size: 150, pad: 0, fit: 'contain', removeBg: true, tol: 24, pinned: false, dir: '', theme: 'system' };
+const DEFAULTS = { bg: KAKAO_DEFAULT_BG, size: 120, pad: 0, fit: 'contain', removeBg: true, tol: 24, pinned: false, dir: '', theme: 'system' };
 // settings.json next to the exe, injected by the backend before this script runs.
 const settings = { ...DEFAULTS, ...parseSettings(window.__SETTINGS__) };
 function parseSettings(text) {

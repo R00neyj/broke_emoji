@@ -35,7 +35,7 @@ Core flow:
 | Item | Value | Status |
 | --- | --- | --- |
 | Reference size | 360×360 | KakaoTalk spec |
-| Output canvas | Square, default 150×150, padding 0% (user setting) | Needs calibration |
+| Output canvas | Square, default 120×120, padding 0% (user setting) | Needs calibration |
 | Image fit | Contain (default, whole image + background padding) or cover (center-cropped square); global setting | Decided |
 | Background | Opaque, user's chat background color (default `#BACEE0`) | Decided |
 | Format | Stored: transparent PNG. Clipboard: opaque bitmap | Decided |
