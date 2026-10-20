@@ -53,29 +53,29 @@
     if (flat < border.length * 0.4) return false;
 
     const N = W * H;
+    const near = new Uint8Array(N);
+    for (let p = 0; p < N; p++) near[p] = dist(d, p * 4, bg) <= tol ? 1 : 0;
+
+    // 1. Flood fill from the edges.
     const isBg = new Uint8Array(N);
     const stack = new Int32Array(N);
     let sp = 0;
-    const fill = (test) => {
-      while (sp) {
-        const p = stack[--sp];
-        const x = p % W;
-        const visit = (q) => { if (!isBg[q] && test(q)) { isBg[q] = 1; stack[sp++] = q; } };
-        if (x > 0) visit(p - 1);
-        if (x < W - 1) visit(p + 1);
-        if (p >= W) visit(p - W);
-        if (p < N - W) visit(p + W);
-      }
-    };
-
-    // 1. Flood fill from the edges.
-    const near = (q) => dist(d, q * 4, bg) <= tol;
-    for (const p of border) if (!isBg[p] && near(p)) { isBg[p] = 1; stack[sp++] = p; }
-    fill(near);
+    for (const p of border) if (!isBg[p] && near[p]) { isBg[p] = 1; stack[sp++] = p; }
+    while (sp) {
+      const p = stack[--sp];
+      const x = p % W;
+      const visit = (q) => { if (!isBg[q] && near[q]) { isBg[q] = 1; stack[sp++] = q; } };
+      if (x > 0) visit(p - 1);
+      if (x < W - 1) visit(p + 1);
+      if (p >= W) visit(p - W);
+      if (p < N - W) visit(p + W);
+    }
+    // Tinted backgrounds go through the pocket pass below instead.
+    const tinted = Math.max(...bg) - Math.min(...bg) >= 20;
+    if (!tinted) keepCutOffInside(W, H, near, isBg);
 
     // 2. Enclosed pockets (e.g. between an arm and the head). Only for a tinted
     //    background like KakaoTalk's blue: with white/gray it would eat eyes and teeth.
-    const tinted = Math.max(...bg) - Math.min(...bg) >= 20;
     if (tinted) {
       const tight = (q) => dist(d, q * 4, bg) <= tol / 2;
       const seen = new Uint8Array(N);
@@ -101,6 +101,74 @@
 
     clearRegion(img, isBg, bg, tol);
     return true;
+  }
+
+  // A subject cut off by the frame (a white body running off the bottom edge on a
+  // white background) has no outline there, so the edge flood leaks into it and
+  // erases its inside. Looked at with every gap narrower than `r` closed, the
+  // real background wraps around the subject and touches two or more sides,
+  // while such an inside is a large area touching one side only. If both show
+  // up, each flooded pixel goes to whichever of them is closer (geodesic), and
+  // the inside's share is kept. Mutates `isBg`.
+  function keepCutOffInside(W, H, near, isBg) {
+    const N = W * H;
+    const r = Math.max(2, Math.round(Math.max(W, H) * 0.04));
+    const queue = new Int32Array(N);
+    const each = (p, fn) => {
+      const x = p % W;
+      if (x > 0) fn(p - 1);
+      if (x < W - 1) fn(p + 1);
+      if (p >= W) fn(p - W);
+      if (p < N - W) fn(p + W);
+    };
+
+    // Steps to the nearest subject pixel, capped at r + 1.
+    const far = new Uint16Array(N).fill(r + 1);
+    let head = 0, tail = 0;
+    for (let p = 0; p < N; p++) if (!near[p]) { far[p] = 0; queue[tail++] = p; }
+    while (head < tail) {
+      const p = queue[head++];
+      if (far[p] >= r) continue;
+      each(p, (q) => { if (far[q] > far[p] + 1) { far[q] = far[p] + 1; queue[tail++] = q; } });
+    }
+
+    // Components of the flooded area away from any subject pixel.
+    const sideOf = (p) => {
+      const x = p % W, y = (p - x) / W;
+      return (y === 0 ? 1 : 0) | (y === H - 1 ? 2 : 0) | (x === 0 ? 4 : 0) | (x === W - 1 ? 8 : 0);
+    };
+    const sideCount = (m) => (m & 1) + ((m >> 1) & 1) + ((m >> 2) & 1) + ((m >> 3) & 1);
+    const owner = new Uint8Array(N); // 1 = background, 2 = inside of the subject
+    const comp = new Int32Array(N);
+    let k = 0, hasBg = false, hasInside = false;
+    tail = 0;
+    for (let p = 0; p < N; p++) {
+      if (!isBg[p] || far[p] <= r || comp[p]) continue;
+      k++;
+      const start = tail;
+      let sides = 0;
+      comp[p] = k;
+      queue[tail++] = p;
+      for (let i = start; i < tail; i++) {
+        sides |= sideOf(queue[i]);
+        each(queue[i], (q) => { if (isBg[q] && far[q] > r && !comp[q]) { comp[q] = k; queue[tail++] = q; } });
+      }
+      const n = sideCount(sides);
+      const label = n >= 2 ? 1 : n === 1 && tail - start >= N * 0.1 ? 2 : 0;
+      if (label === 1) hasBg = true;
+      if (label === 2) hasInside = true;
+      if (label) for (let i = start; i < tail; i++) owner[queue[i]] = label;
+      else tail = start; // unlabeled: left for the expansion below
+    }
+    if (!hasBg || !hasInside) return;
+
+    // Grow both labels through the flooded area at the same pace.
+    head = 0;
+    while (head < tail) {
+      const p = queue[head++];
+      each(p, (q) => { if (isBg[q] && !owner[q]) { owner[q] = owner[p]; queue[tail++] = q; } });
+    }
+    for (let p = 0; p < N; p++) if (owner[p] === 2) isBg[p] = 0;
   }
 
   // Makes the `isBg` pixels transparent. Anti-aliased rim: pixels touching the

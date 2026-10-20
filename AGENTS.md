@@ -17,7 +17,7 @@ Core flow:
 
 - A transparent PNG is useless: KakaoTalk fills transparency with white/black. The copied image MUST be opaque and painted with the user's own chat background color so it blends in like a real emoticon.
 - Each user's chat background differs, so the color is a user setting (color picker, hex, on-screen eyedropper; default KakaoTalk `#BACEE0`).
-- Background removal only runs when most of the border is one flat color; photos and scenes are kept as-is. Enclosed pockets are removed only for tinted backgrounds (not white/gray) so eyes and teeth survive.
+- Background removal only runs when most of the border is one flat color; photos and scenes are kept as-is. Enclosed pockets are removed only for tinted backgrounds (not white/gray) so eyes and teeth survive. On white/gray, a subject cut off by the frame (white body running off an edge with no outline) keeps its inside: with gaps narrower than 4% of the long side closed, an edge-connected area touching only one side and covering ≥10% of the image counts as subject, not background (tradeoff: a large white gap between legs reaching one edge also stays; erase it with 투명 처리).
 
 ## Principles
 
