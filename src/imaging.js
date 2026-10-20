@@ -99,9 +99,16 @@
     for (let p = 0; p < N; p++) removed += isBg[p];
     if (removed === N) return false;
 
-    // 3. Anti-aliased rim: pixels touching the background are a blend of
-    //    subject and background. Estimate alpha and un-blend the background color
-    //    so no blue/white halo shows on a different chat background.
+    clearRegion(img, isBg, bg, tol);
+    return true;
+  }
+
+  // Makes the `isBg` pixels transparent. Anti-aliased rim: pixels touching the
+  // region are a blend of subject and `bg`. Estimate alpha and un-blend the
+  // color so no blue/white halo shows on a different chat background.
+  function clearRegion(img, isBg, bg, tol) {
+    const { width: W, height: H, data: d } = img;
+    const N = W * H;
     const soft = tol * 3;
     for (let p = 0; p < N; p++) {
       if (isBg[p]) continue;
@@ -121,6 +128,30 @@
     for (let p = 0; p < N; p++) {
       if (isBg[p]) { const i = p * 4; d[i] = d[i + 1] = d[i + 2] = d[i + 3] = 0; }
     }
+  }
+
+  // Magic wand: makes the connected area around (x, y) whose color is within
+  // `tol` of the clicked pixel transparent. Mutates `img`; false if nothing changed.
+  function eraseAt(img, x, y, tol) {
+    const { width: W, height: H, data: d } = img;
+    if (x < 0 || y < 0 || x >= W || y >= H) return false;
+    const seed = y * W + x;
+    if (d[seed * 4 + 3] === 0) return false;
+    const bg = [d[seed * 4], d[seed * 4 + 1], d[seed * 4 + 2]];
+    const N = W * H;
+    const isBg = new Uint8Array(N);
+    const stack = [seed];
+    isBg[seed] = 1;
+    const test = (q) => d[q * 4 + 3] > 0 && dist(d, q * 4, bg) <= tol;
+    while (stack.length) {
+      const p = stack.pop(), px = p % W;
+      const visit = (q) => { if (!isBg[q] && test(q)) { isBg[q] = 1; stack.push(q); } };
+      if (px > 0) visit(p - 1);
+      if (px < W - 1) visit(p + 1);
+      if (p >= W) visit(p - W);
+      if (p < N - W) visit(p + W);
+    }
+    clearRegion(img, isBg, bg, tol);
     return true;
   }
 
@@ -156,6 +187,7 @@
   }
 
   exports.removeBackground = removeBackground;
+  exports.eraseAt = eraseAt;
   exports.alphaBBox = alphaBBox;
   exports.fitBox = fitBox;
 })(typeof module === 'object' ? module.exports : (window.imaging = {}));

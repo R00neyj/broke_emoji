@@ -51,6 +51,7 @@ Core flow:
 - **Drag out:** dragging a cell out of the window starts a native file drag (crate `drag`) of the composited PNG written to `<data>/drag/`, so it can be dropped into a KakaoTalk chat. That folder is cleared on app start, not per drag, because the drop target may read the file later.
 - **Multi-select:** long-press a cell (or right-click → 여러 개 선택) to enter selection mode; clicks toggle, the bottom bar offers select all / move to tab / delete / done, Esc exits.
 - **Crop:** right-click → 자르기 opens a crop view (drag to move, corner handle to resize, square lock on by default). The box may extend past the image up to a square of the image's long side; that area stays transparent and gets the chat background on copy. "새로 저장" adds the crop as a new image; "덮어쓰기" replaces the stored PNG (irreversible).
+- **Magic-wand erase:** right-click → 투명 처리 opens an erase view previewed on the chat background. Clicking makes the connected area of similar color (within the background tolerance setting) transparent, with the same rim un-blending as automatic removal; covers pockets the automatic pass keeps (e.g. inside "ㅇ" on white). 되돌리기 undoes clicks; "새로 저장" / "덮어쓰기" as in crop.
 - **Settings window:** the gear opens a separate window (same page, `window.__MODE__ = 'settings'`, owned by the gallery window). Both windows write `settings.json` and sync via the `settings-changed` event; closing the gallery quits the app. Background presets are KakaoTalk's 15 built-in chat colors.
 
 ## Build

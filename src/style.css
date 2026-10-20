@@ -300,6 +300,9 @@ body:has(.selectbar:not([hidden])) .toast { bottom: 60px; }
   background: var(--button-bg);
 }
 .crop-bar .primary { background: var(--fg); border-color: var(--fg); color: var(--bg); }
+.crop-bar button:disabled { opacity: .4; }
+.crop-bar .hint { color: var(--muted, inherit); font-size: 12px; opacity: .7; }
+.erase-canvas { position: absolute; cursor: crosshair; image-rendering: pixelated; }
 
 .drop {
   position: fixed;

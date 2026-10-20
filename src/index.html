@@ -90,6 +90,18 @@
     </div>
   </section>
 
+  <section id="eraser" class="cropper" hidden>
+    <div id="erase-stage" class="crop-stage"><canvas id="erase-canvas" class="erase-canvas"></canvas></div>
+    <div class="crop-bar">
+      <span class="hint">지울 곳을 클릭</span>
+      <button id="erase-undo" type="button" disabled>되돌리기</button>
+      <span class="spacer"></span>
+      <button id="erase-cancel" type="button">취소</button>
+      <button id="erase-new" type="button">새로 저장</button>
+      <button id="erase-overwrite" type="button" class="primary">덮어쓰기</button>
+    </div>
+  </section>
+
   <div id="menu" class="menu" hidden></div>
   <div id="drop" class="drop" hidden>여기에 놓으면 추가돼요</div>
   <input id="file" type="file" accept="image/*" multiple hidden>

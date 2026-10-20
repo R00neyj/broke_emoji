@@ -2,7 +2,7 @@
 
 const { invoke } = window.__TAURI__.core;
 const appWindow = window.__TAURI__.window.getCurrentWindow();
-const { removeBackground, alphaBBox, fitBox } = window.imaging;
+const { removeBackground, eraseAt, alphaBBox, fitBox } = window.imaging;
 
 // Imported images are stored at most this large (KakaoTalk emoticon reference size).
 const STORE_MAX = 360;
@@ -179,6 +179,7 @@ async function renderGrid() {
       showMenu(e.clientX, e.clientY, [
         ['복사', () => run(() => copyImage(img, cell))],
         ['자르기', () => openCropper(tab.name, name, img)],
+        ['투명 처리 (클릭해서 지우기)', () => openEraser(tab.name, name, img)],
         ['여러 개 선택', () => { selection = new Set(); toggleSelected(name, cell); }],
         ['삭제', () => run(() => deleteImages(tab.name, [name]))],
       ]);
@@ -335,7 +336,11 @@ $('crop-square').onchange = (e) => {
 };
 
 addEventListener('resize', () => { if (!$('cropper').hidden) layoutCrop(); });
-addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('cropper').hidden) $('cropper').hidden = true; });
+addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  if (!$('cropper').hidden) $('cropper').hidden = true;
+  if (!$('eraser').hidden) $('eraser').hidden = true;
+});
 $('crop-cancel').onclick = () => { $('cropper').hidden = true; };
 
 async function croppedPng() {
@@ -362,6 +367,80 @@ $('crop-overwrite').onclick = () => run(async () => {
   $('cropper').hidden = true;
   await refresh();
   toast('잘라서 덮어썼어요');
+});
+
+// ---------- magic-wand erase ----------
+
+// Clicked areas become transparent (e.g. the inside of a letter "ㅇ", which the
+// automatic removal keeps on white backgrounds to protect eyes and teeth).
+// Previewed on the chat background, like the gallery.
+const eraser = { tab: '', name: '', data: null, undo: [] };
+
+function openEraser(tab, name, img) {
+  const c = $('erase-canvas');
+  c.width = img.naturalWidth;
+  c.height = img.naturalHeight;
+  c.style.background = settings.bg;
+  const ctx = c.getContext('2d');
+  ctx.drawImage(img, 0, 0);
+  Object.assign(eraser, { tab, name, data: ctx.getImageData(0, 0, c.width, c.height), undo: [] });
+  $('erase-undo').disabled = true;
+  $('eraser').hidden = false;
+  layoutEraser();
+}
+
+function layoutEraser() {
+  const c = $('erase-canvas');
+  const stage = $('erase-stage').getBoundingClientRect();
+  const s = Math.min(stage.width / c.width, stage.height / c.height);
+  Object.assign(c.style, {
+    width: c.width * s + 'px', height: c.height * s + 'px',
+    left: (stage.width - c.width * s) / 2 + 'px', top: (stage.height - c.height * s) / 2 + 'px',
+  });
+}
+
+addEventListener('resize', () => { if (!$('eraser').hidden) layoutEraser(); });
+
+$('erase-canvas').onclick = (e) => {
+  const c = e.currentTarget, r = c.getBoundingClientRect();
+  const x = Math.floor((e.clientX - r.left) * c.width / r.width);
+  const y = Math.floor((e.clientY - r.top) * c.height / r.height);
+  const before = new Uint8ClampedArray(eraser.data.data);
+  if (!eraseAt(eraser.data, x, y, settings.tol)) return;
+  eraser.undo.push(before);
+  $('erase-undo').disabled = false;
+  c.getContext('2d').putImageData(eraser.data, 0, 0);
+};
+
+$('erase-undo').onclick = () => {
+  const prev = eraser.undo.pop();
+  if (!prev) return;
+  eraser.data.data.set(prev);
+  $('erase-canvas').getContext('2d').putImageData(eraser.data, 0, 0);
+  $('erase-undo').disabled = !eraser.undo.length;
+};
+
+$('erase-cancel').onclick = () => { $('eraser').hidden = true; };
+
+async function erasedPng() {
+  const blob = await new Promise((res) => $('erase-canvas').toBlob(res, 'image/png'));
+  return Array.from(new Uint8Array(await blob.arrayBuffer()));
+}
+
+$('erase-new').onclick = () => run(async () => {
+  await invoke('save_image', { tab: eraser.tab, bytes: await erasedPng() });
+  $('eraser').hidden = true;
+  await refresh();
+  toast('새 이미지로 저장했어요');
+});
+$('erase-overwrite').onclick = () => run(async () => {
+  await invoke('replace_image', { tab: eraser.tab, name: eraser.name, bytes: await erasedPng() });
+  const key = eraser.tab + '/' + eraser.name;
+  URL.revokeObjectURL(urls.get(key));
+  urls.delete(key);
+  $('eraser').hidden = true;
+  await refresh();
+  toast('투명 처리해서 덮어썼어요');
 });
 
 async function run(fn) {
