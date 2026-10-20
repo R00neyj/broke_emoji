@@ -1,0 +1,45 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - run: npm ci
+
+      - run: npm run build
+
+      - name: Rename exe (ASCII asset name)
+        shell: pwsh
+        run: Copy-Item "src-tauri/target/release/거지티콘.exe" "broke_emoji-${{ github.ref_name }}.exe"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: broke_emoji
+          path: broke_emoji-*.exe
+
+      - uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: broke_emoji-*.exe
+          generate_release_notes: true
