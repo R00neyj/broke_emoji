@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>거지티콘</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top">
+    <div class="title">이모티콘</div>
+    <div class="actions">
+      <button id="btn-add" class="icon" title="이미지 추가">
+        <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+      </button>
+      <button id="btn-pin" class="icon" title="항상 위에 고정">
+        <svg viewBox="0 0 24 24"><path d="M9 4h6l-1 6 4 4H6l4-4zM12 14v6"/></svg>
+      </button>
+      <button id="btn-settings" class="icon" title="설정">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <nav id="packs" class="packs"></nav>
+
+  <main id="grid" class="grid"></main>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <section id="settings" class="settings" hidden>
+    <h2>설정</h2>
+    <label class="row">
+      <span>카톡 배경색</span>
+      <span class="field">
+        <input id="set-bg" type="color">
+        <input id="set-bg-hex" type="text" maxlength="7" spellcheck="false">
+        <button id="btn-eyedropper" type="button" title="화면에서 색 찍기">스포이드</button>
+      </span>
+    </label>
+    <p class="hint">카톡 채팅방 배경색과 같게 맞추면 이모티콘처럼 보여요. <button id="btn-bg-default" type="button" class="link">카톡 기본(#BACEE0)</button></p>
+    <label class="row"><span>출력 크기(px)</span><input id="set-size" type="number" min="32" max="1024" step="1"></label>
+    <label class="row"><span>여백(%)</span><input id="set-pad" type="number" min="0" max="40" step="1"></label>
+    <label class="row"><span>추가할 때 배경 제거</span><input id="set-remove" type="checkbox"></label>
+    <label class="row"><span>배경 제거 허용 오차</span><input id="set-tol" type="number" min="0" max="128" step="1"></label>
+    <label class="row col">
+      <span>갤러리 폴더</span>
+      <span class="field">
+        <input id="set-dir" type="text" spellcheck="false">
+        <button id="btn-dir-apply" type="button">적용</button>
+        <button id="btn-dir-open" type="button">열기</button>
+      </span>
+    </label>
+    <button id="btn-settings-close" type="button" class="primary">닫기</button>
+  </section>
+
+  <div id="menu" class="menu" hidden></div>
+  <div id="drop" class="drop" hidden>여기에 놓으면 추가돼요</div>
+  <input id="file" type="file" accept="image/*" multiple hidden>
+
+  <script src="imaging.js"></script>
+  <script src="main.js"></script>
+</body>
+</html>
