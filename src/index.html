@@ -13,8 +13,8 @@
       <button id="btn-add" class="icon" title="이미지 추가">
         <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
       </button>
-      <button id="btn-pin" class="icon" title="항상 위에 고정">
-        <svg viewBox="0 0 24 24"><path d="M9 4h6l-1 6 4 4H6l4-4zM12 14v6"/></svg>
+      <button id="btn-dock" class="icon" title="카톡 채팅방 옆에 붙이기">
+        <svg viewBox="0 0 24 24"><rect x="3" y="5" width="11" height="14" rx="1.5"/><rect x="16" y="5" width="5" height="14" rx="1.5"/></svg>
       </button>
       <button id="btn-settings" class="icon" title="설정">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/></svg>
@@ -43,6 +43,13 @@
         <option value="system">시스템 설정 따르기</option>
         <option value="light">라이트</option>
         <option value="dark">다크</option>
+      </select>
+    </label>
+    <label class="row">
+      <span>카톡 채팅방에 붙는 위치</span>
+      <select id="set-dock-side">
+        <option value="right">오른쪽</option>
+        <option value="left">왼쪽</option>
       </select>
     </label>
     <label class="row">

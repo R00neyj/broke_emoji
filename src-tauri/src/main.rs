@@ -10,6 +10,9 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+#[cfg(windows)]
+mod dock;
+
 use serde::Serialize;
 use tauri::{ipc::Response, Manager, State, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 
@@ -403,6 +406,19 @@ async fn pick_screen_color() -> Result<Option<String>, String> {
     Err("Windows에서만 지원해요".into())
 }
 
+/// Docks the gallery beside the active KakaoTalk chat room (`left`: preferred side).
+#[cfg(windows)]
+#[tauri::command]
+fn set_dock(on: bool, left: bool) {
+    dock::set(on, left);
+}
+
+#[cfg(not(windows))]
+#[tauri::command]
+fn set_dock() -> Result<(), String> {
+    Err("Windows에서만 지원해요".into())
+}
+
 /// Opens (or focuses) the separate settings window. It loads the same page in
 /// settings mode with the current settings.json; the windows sync via events.
 #[tauri::command]
@@ -413,14 +429,15 @@ async fn open_settings(app: tauri::AppHandle, data: State<'_, DataDir>) -> Resul
     }
     let settings = fs::read_to_string(data.0.join("settings.json")).unwrap_or_default();
     let mut builder = WebviewWindowBuilder::new(&app, "settings", WebviewUrl::default());
-    // Owned by the gallery window so it stays above it even when the gallery is pinned.
+    // Owned by the gallery window so it stays above it (also when docked over KakaoTalk).
     if let Some(main) = app.get_webview_window("main") {
         builder = builder.parent(&main).map_err(err)?;
     }
     builder
         .title(format!("{APP_NAME} 설정"))
-        // Tall enough to show every setting without scrolling (content ≈ 685px at 360 wide).
-        .inner_size(360.0, 700.0)
+        // Tall enough to show every setting without scrolling (content ≈ 685px at 360 wide
+        // before the dock-side row was added; one more row fits in the extra 40px).
+        .inner_size(360.0, 740.0)
         .min_inner_size(320.0, 400.0)
         .disable_drag_drop_handler()
         // Must match the main window: WebView2 allows one profile per process.
@@ -460,6 +477,7 @@ fn main() {
             copy_image,
             start_drag,
             pick_screen_color,
+            set_dock,
             open_settings
         ])
         .setup(move |app| {
@@ -474,6 +492,8 @@ fn main() {
                 .data_directory(webview_dir)
                 .initialization_script(&format!("window.__SETTINGS__ = {settings:?};"))
                 .build()?;
+            #[cfg(windows)]
+            dock::start(main_window.hwnd()?.0);
             // Closing the gallery quits the app even if the settings window is open.
             let handle = app.handle().clone();
             main_window.on_window_event(move |e| {

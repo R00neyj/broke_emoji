@@ -8,9 +8,10 @@ const { removeBackground, eraseAt, alphaBBox, fitBox } = window.imaging;
 const STORE_MAX = 360;
 const KAKAO_DEFAULT_BG = '#bacee0';
 
-const DEFAULTS = { bg: KAKAO_DEFAULT_BG, size: 120, pad: 0, fit: 'contain', removeBg: true, tol: 24, pinned: false, dir: '', theme: 'system' };
+const DEFAULTS = { bg: KAKAO_DEFAULT_BG, size: 120, pad: 0, fit: 'contain', removeBg: true, tol: 24, dock: false, dockSide: 'right', dir: '', theme: 'system' };
 // settings.json next to the exe, injected by the backend before this script runs.
 const settings = { ...DEFAULTS, ...parseSettings(window.__SETTINGS__) };
+delete settings.pinned; // replaced by dock
 function parseSettings(text) {
   try {
     const v = JSON.parse(text || '{}');
@@ -660,16 +661,21 @@ addEventListener('drop', (e) => {
   draggingOut = false;
 });
 
-// ---------- pin ----------
+// ---------- dock beside the KakaoTalk chat room ----------
 
-async function setPinned(on) {
-  await appWindow.setAlwaysOnTop(on);
-  settings.pinned = on;
-  saveSettings();
-  $('btn-pin').classList.toggle('on', on);
-  $('btn-pin').title = on ? '고정 해제' : '항상 위에 고정';
+async function setDock(on) {
+  await invoke('set_dock', { on, left: settings.dockSide === 'left' });
+  settings.dock = on;
+  showDock();
 }
-$('btn-pin').onclick = () => run(() => setPinned(!settings.pinned));
+function showDock() {
+  $('btn-dock').classList.toggle('on', settings.dock);
+  $('btn-dock').title = settings.dock ? '카톡 채팅방에서 떼기' : '카톡 채팅방 옆에 붙이기';
+}
+$('btn-dock').onclick = () => run(async () => {
+  await setDock(!settings.dock);
+  saveSettings();
+});
 
 // ---------- settings ----------
 
@@ -776,6 +782,7 @@ systemDark.addEventListener('change', applyTheme);
 $('set-theme').value = settings.theme;
 $('set-theme').onchange = (e) => { settings.theme = e.target.value; saveSettings(); applyTheme(); };
 applyTheme();
+$('set-dock-side').onchange = (e) => { settings.dockSide = e.target.value; saveSettings(); };
 
 $('btn-dir-apply').onclick = () => run(async () => {
   const dir = await invoke('open_gallery', { dir: $('set-dir').value });
@@ -802,16 +809,18 @@ function syncFromSettings() {
   $('set-remove').checked = settings.removeBg;
   $('set-fit').value = settings.fit;
   $('set-theme').value = settings.theme;
+  $('set-dock-side').value = settings.dockSide;
   applyFit();
   applyTheme();
 }
 
 listen('settings-changed', ({ payload }) => {
   const dirChanged = payload.dir !== settings.dir;
+  const dockChanged = payload.dock !== settings.dock || payload.dockSide !== settings.dockSide;
   Object.assign(settings, payload);
   syncFromSettings();
   if (SETTINGS_MODE) return;
-  $('btn-pin').classList.toggle('on', settings.pinned);
+  if (dockChanged) run(() => setDock(settings.dock));
   if (dirChanged) {
     urls.forEach((u) => URL.revokeObjectURL(u));
     urls.clear();
@@ -841,7 +850,8 @@ $('btn-settings').onclick = () => run(() => invoke('open_settings'));
       dir = await invoke('open_gallery', { dir: null });
     }
     $('set-dir').value = dir;
-    if (settings.pinned) await setPinned(true);
+    if (settings.dock) await setDock(true);
+    else showDock();
     await refresh();
   });
   watchGallery();
