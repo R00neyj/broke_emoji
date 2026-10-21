@@ -3,7 +3,8 @@
 //! A dedicated thread owns out-of-context WinEvent hooks (nothing is injected into
 //! KakaoTalk): when a chat room becomes the foreground window, the gallery is raised
 //! above it without taking focus and moved next to it; while the chat room moves or
-//! resizes, the gallery follows. A chat room is a visible, minimizable, non-topmost
+//! resizes, the gallery follows, and it is minimized and restored together with the
+//! chat room. A chat room is a visible, minimizable, non-topmost
 //! top-level window of `KakaoTalk.exe` containing a `RICHEDIT50W` (the message
 //! input); the main window (friend list) has no input and notification popups are
 //! neither minimizable app windows nor non-topmost.
@@ -32,6 +33,8 @@ use windows_sys::{
                 EnumChildWindows, EnumWindows, GetAncestor, GetClassNameW, GetMessageW, GetWindow,
                 GetWindowLongW, GetWindowRect, GetWindowThreadProcessId, IsIconic, IsWindowVisible, PeekMessageW,
                 PostThreadMessageW, SetWindowPos, CHILDID_SELF, EVENT_OBJECT_LOCATIONCHANGE, EVENT_SYSTEM_FOREGROUND,
+                EVENT_SYSTEM_MINIMIZEEND, EVENT_SYSTEM_MINIMIZESTART, ShowWindow, SW_SHOWMINNOACTIVE,
+                SW_SHOWNOACTIVATE,
                 GA_ROOT, GWL_EXSTYLE, GWL_STYLE, GW_HWNDPREV, HWND_TOP, MSG, OBJID_WINDOW, PM_NOREMOVE, SWP_NOACTIVATE,
                 SWP_NOZORDER, WINEVENT_OUTOFCONTEXT, WINEVENT_SKIPOWNPROCESS, WM_APP, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
                 WS_MINIMIZEBOX,
@@ -48,8 +51,10 @@ static THREAD: AtomicU32 = AtomicU32::new(0);
 thread_local! {
     /// Chat room being followed (hook thread only).
     static TARGET: Cell<isize> = const { Cell::new(0) };
-    /// Location hook scoped to the KakaoTalk process: (hook, pid).
-    static LOCATION: Cell<(isize, u32)> = const { Cell::new((0, 0)) };
+    /// Hooks scoped to the KakaoTalk process (location, minimize/restore) and its pid.
+    static KAKAO_HOOKS: Cell<([isize; 2], u32)> = const { Cell::new(([0; 2], 0)) };
+    /// The gallery was minimized because the chat room was; restore it with the chat room.
+    static AUTO_MINIMIZED: Cell<bool> = const { Cell::new(false) };
 }
 
 /// Starts the hook thread for the gallery window `main`.
@@ -96,10 +101,8 @@ pub fn set(on: bool, left: bool) {
 unsafe fn apply() {
     if !ON.load(Ordering::Relaxed) {
         TARGET.set(0);
-        let (hook, _) = LOCATION.replace((0, 0));
-        if hook != 0 {
-            UnhookWinEvent(hook as HWINEVENTHOOK);
-        }
+        AUTO_MINIMIZED.set(false);
+        unhook_kakao();
         return;
     }
     // EnumWindows walks top-level windows in z-order, topmost first.
@@ -134,12 +137,29 @@ unsafe extern "system" fn on_event(
         if is_chat(hwnd) {
             follow(hwnd, true);
         }
-    } else if event == EVENT_OBJECT_LOCATIONCHANGE
-        && object == OBJID_WINDOW
-        && child == CHILDID_SELF as i32
-        && hwnd as isize == TARGET.get()
-    {
-        place(hwnd, false);
+        return;
+    }
+    if object != OBJID_WINDOW || child != CHILDID_SELF as i32 || hwnd as isize != TARGET.get() {
+        return;
+    }
+    match event {
+        EVENT_OBJECT_LOCATIONCHANGE => place(hwnd, false),
+        EVENT_SYSTEM_MINIMIZESTART => {
+            let main = MAIN.load(Ordering::Relaxed) as HWND;
+            if IsIconic(main) == 0 {
+                ShowWindow(main, SW_SHOWMINNOACTIVE);
+                AUTO_MINIMIZED.set(true);
+            }
+        }
+        EVENT_SYSTEM_MINIMIZEEND => follow(hwnd, true),
+        _ => {}
+    }
+}
+
+unsafe fn unhook_kakao() {
+    let (hooks, _) = KAKAO_HOOKS.replace(([0; 2], 0));
+    for hook in hooks.into_iter().filter(|&h| h != 0) {
+        UnhookWinEvent(hook as HWINEVENTHOOK);
     }
 }
 
@@ -147,22 +167,23 @@ unsafe fn follow(chat: HWND, raise: bool) {
     TARGET.set(chat as isize);
     let mut pid = 0;
     GetWindowThreadProcessId(chat, &mut pid);
-    let (hook, hooked) = LOCATION.get();
-    if pid != hooked {
-        if hook != 0 {
-            UnhookWinEvent(hook as HWINEVENTHOOK);
-        }
+    if pid != KAKAO_HOOKS.get().1 {
+        unhook_kakao();
         // Scoped to KakaoTalk so system-wide cursor/caret moves don't wake this thread.
-        let hook = SetWinEventHook(
-            EVENT_OBJECT_LOCATIONCHANGE,
-            EVENT_OBJECT_LOCATIONCHANGE,
-            std::ptr::null_mut(),
-            Some(on_event),
-            pid,
-            0,
-            WINEVENT_OUTOFCONTEXT,
-        );
-        LOCATION.set((hook as isize, pid));
+        let hook = |first, last| {
+            SetWinEventHook(first, last, std::ptr::null_mut(), Some(on_event), pid, 0, WINEVENT_OUTOFCONTEXT) as isize
+        };
+        let hooks = [
+            hook(EVENT_OBJECT_LOCATIONCHANGE, EVENT_OBJECT_LOCATIONCHANGE),
+            hook(EVENT_SYSTEM_MINIMIZESTART, EVENT_SYSTEM_MINIMIZEEND),
+        ];
+        KAKAO_HOOKS.set((hooks, pid));
+    }
+    // Any chat room coming back brings back a gallery minimized along with a chat room;
+    // a gallery the user minimized stays minimized.
+    let main = MAIN.load(Ordering::Relaxed) as HWND;
+    if AUTO_MINIMIZED.replace(false) && IsIconic(main) != 0 {
+        ShowWindow(main, SW_SHOWNOACTIVATE);
     }
     place(chat, raise);
 }
