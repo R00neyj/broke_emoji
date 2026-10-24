@@ -17,6 +17,8 @@ use serde::Serialize;
 use tauri::{ipc::Response, Manager, State, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 
 const APP_NAME: &str = "거지티콘";
+/// Argument of the Run-key command: start hidden until a KakaoTalk chat room opens.
+const AUTOSTART_ARG: &str = "--autostart";
 
 /// Portable data folder next to the exe: settings, default gallery, WebView2 profile.
 struct DataDir(PathBuf);
@@ -413,9 +415,100 @@ fn set_dock(on: bool, left: bool) {
     dock::set(on, left);
 }
 
+#[cfg(windows)]
+const TRAY_ID: &str = "main";
+
+/// Tray icon (open / quit): always present, keeps the app reachable while the
+/// gallery is hidden in the background.
+#[cfg(windows)]
+fn tray(app: &tauri::AppHandle) -> tauri::Result<()> {
+    use tauri::{
+        menu::{Menu, MenuItem},
+        tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    };
+    let menu = Menu::with_items(
+        app,
+        &[
+            &MenuItem::with_id(app, "open", "열기", true, None::<&str>)?,
+            &MenuItem::with_id(app, "quit", "종료", true, None::<&str>)?,
+        ],
+    )?;
+    let mut builder = TrayIconBuilder::with_id(TRAY_ID)
+        .tooltip(APP_NAME)
+        .menu(&menu)
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, e| match e.id.as_ref() {
+            "open" => show_main(app),
+            _ => app.exit(0),
+        })
+        .on_tray_icon_event(|tray, e| {
+            if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = e {
+                show_main(tray.app_handle());
+            }
+        });
+    if let Some(icon) = app.default_window_icon() {
+        builder = builder.icon(icon.clone());
+    }
+    builder.build(app).map(|_| ())
+}
+
+#[cfg(windows)]
+fn show_main(app: &tauri::AppHandle) {
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.show();
+        let _ = w.unminimize();
+        let _ = w.set_focus();
+    }
+}
+
+#[cfg(windows)]
+const RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
+
+/// Starts the app at Windows sign-in (`HKCU\...\Run`, no admin needed) or stops it.
+/// The value is rewritten on every start while enabled, so a moved exe keeps working.
+#[cfg(windows)]
+#[tauri::command]
+fn set_autostart(on: bool) -> Result<(), String> {
+    use windows_sys::Win32::System::Registry::{
+        RegCloseKey, RegDeleteValueW, RegOpenKeyExW, RegSetValueExW, HKEY, HKEY_CURRENT_USER, KEY_SET_VALUE, REG_SZ,
+    };
+    let wide = |s: &str| s.encode_utf16().chain(std::iter::once(0)).collect::<Vec<u16>>();
+    let (key_name, value_name) = (wide(RUN_KEY), wide(APP_NAME));
+    // SAFETY: NUL-terminated UTF-16 buffers outlive the calls; `key` is closed below.
+    unsafe {
+        let mut key: HKEY = std::ptr::null_mut();
+        let rc = RegOpenKeyExW(HKEY_CURRENT_USER, key_name.as_ptr(), 0, KEY_SET_VALUE, &mut key);
+        if rc != 0 {
+            return Err(format!("레지스트리를 열 수 없어요 ({rc})"));
+        }
+        let rc = if on {
+            let exe = std::env::current_exe().map_err(err)?;
+            let cmd = wide(&format!("\"{}\" {AUTOSTART_ARG}", exe.display()));
+            RegSetValueExW(key, value_name.as_ptr(), 0, REG_SZ, cmd.as_ptr() as *const u8, (cmd.len() * 2) as u32)
+        } else {
+            // Not found is fine: already off.
+            match RegDeleteValueW(key, value_name.as_ptr()) {
+                2 => 0,
+                rc => rc,
+            }
+        };
+        RegCloseKey(key);
+        if rc != 0 {
+            return Err(format!("자동 실행을 바꿀 수 없어요 ({rc})"));
+        }
+    }
+    Ok(())
+}
+
 #[cfg(not(windows))]
 #[tauri::command]
 fn set_dock() -> Result<(), String> {
+    Err("Windows에서만 지원해요".into())
+}
+
+#[cfg(not(windows))]
+#[tauri::command]
+fn set_autostart() -> Result<(), String> {
     Err("Windows에서만 지원해요".into())
 }
 
@@ -448,7 +541,38 @@ async fn open_settings(app: tauri::AppHandle, data: State<'_, DataDir>) -> Resul
         .map_err(err)
 }
 
+/// Allows one instance: a second launch brings the running one to the front
+/// (it may be hidden in the tray) and returns false.
+#[cfg(windows)]
+fn single_instance() -> bool {
+    use windows_sys::Win32::{
+        Foundation::{GetLastError, ERROR_ALREADY_EXISTS},
+        System::Threading::CreateMutexW,
+        UI::WindowsAndMessaging::{FindWindowW, SetForegroundWindow, ShowWindow, SW_RESTORE, SW_SHOW},
+    };
+    let wide = |s: &str| s.encode_utf16().chain(std::iter::once(0)).collect::<Vec<u16>>();
+    // SAFETY: NUL-terminated UTF-16 buffers; the mutex handle is kept until exit on purpose.
+    unsafe {
+        CreateMutexW(std::ptr::null(), 0, wide("com.yoonjinwon.makeemoji").as_ptr());
+        if GetLastError() != ERROR_ALREADY_EXISTS {
+            return true;
+        }
+        let w = FindWindowW(std::ptr::null(), wide(APP_NAME).as_ptr());
+        if !w.is_null() {
+            ShowWindow(w, SW_SHOW);
+            ShowWindow(w, SW_RESTORE);
+            SetForegroundWindow(w);
+        }
+        false
+    }
+}
+
 fn main() {
+    #[cfg(windows)]
+    if !single_instance() {
+        return;
+    }
+    let hidden = std::env::args().any(|a| a == AUTOSTART_ARG);
     let data = std::env::current_exe()
         .ok()
         .and_then(|exe| exe.parent().map(|p| p.join(format!("{APP_NAME}_data"))))
@@ -478,6 +602,7 @@ fn main() {
             start_drag,
             pick_screen_color,
             set_dock,
+            set_autostart,
             open_settings
         ])
         .setup(move |app| {
@@ -488,12 +613,15 @@ fn main() {
                 // 4 × 70px cells + 3 × 10px gaps + 2 × 12px padding + 6px scrollbar.
                 .inner_size(340.0, 320.0)
                 .min_inner_size(340.0, 320.0)
+                .visible(!hidden)
                 .disable_drag_drop_handler()
                 .data_directory(webview_dir)
                 .initialization_script(&format!("window.__SETTINGS__ = {settings:?};"))
                 .build()?;
             #[cfg(windows)]
-            dock::start(main_window.hwnd()?.0);
+            tray(app.handle())?;
+            #[cfg(windows)]
+            dock::start(main_window.hwnd()?.0, hidden);
             // Closing the gallery quits the app even if the settings window is open.
             let handle = app.handle().clone();
             main_window.on_window_event(move |e| {

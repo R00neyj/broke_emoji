@@ -8,10 +8,11 @@ const { removeBackground, eraseAt, alphaBBox, fitBox } = window.imaging;
 const STORE_MAX = 360;
 const KAKAO_DEFAULT_BG = '#bacee0';
 
-const DEFAULTS = { bg: KAKAO_DEFAULT_BG, size: 120, pad: 0, fit: 'contain', removeBg: true, tol: 24, dock: false, dockSide: 'right', dir: '', theme: 'system' };
+const DEFAULTS = { bg: KAKAO_DEFAULT_BG, size: 120, pad: 0, fit: 'contain', removeBg: true, tol: 24, dock: false, dockSide: 'right', autostart: false, dir: '', theme: 'system' };
 // settings.json next to the exe, injected by the backend before this script runs.
 const settings = { ...DEFAULTS, ...parseSettings(window.__SETTINGS__) };
 delete settings.pinned; // replaced by dock
+delete settings.background; // dock now always keeps the app in the tray
 function parseSettings(text) {
   try {
     const v = JSON.parse(text || '{}');
@@ -783,6 +784,7 @@ $('set-theme').value = settings.theme;
 $('set-theme').onchange = (e) => { settings.theme = e.target.value; saveSettings(); applyTheme(); };
 applyTheme();
 $('set-dock-side').onchange = (e) => { settings.dockSide = e.target.value; saveSettings(); };
+$('set-autostart').onchange = (e) => { settings.autostart = e.target.checked; saveSettings(); };
 
 $('btn-dir-apply').onclick = () => run(async () => {
   const dir = await invoke('open_gallery', { dir: $('set-dir').value });
@@ -810,6 +812,7 @@ function syncFromSettings() {
   $('set-fit').value = settings.fit;
   $('set-theme').value = settings.theme;
   $('set-dock-side').value = settings.dockSide;
+  $('set-autostart').checked = settings.autostart;
   applyFit();
   applyTheme();
 }
@@ -817,10 +820,12 @@ function syncFromSettings() {
 listen('settings-changed', ({ payload }) => {
   const dirChanged = payload.dir !== settings.dir;
   const dockChanged = payload.dock !== settings.dock || payload.dockSide !== settings.dockSide;
+  const autostartChanged = payload.autostart !== settings.autostart;
   Object.assign(settings, payload);
   syncFromSettings();
   if (SETTINGS_MODE) return;
   if (dockChanged) run(() => setDock(settings.dock));
+  if (autostartChanged) run(() => invoke('set_autostart', { on: settings.autostart }));
   if (dirChanged) {
     urls.forEach((u) => URL.revokeObjectURL(u));
     urls.clear();
@@ -850,8 +855,10 @@ $('btn-settings').onclick = () => run(() => invoke('open_settings'));
       dir = await invoke('open_gallery', { dir: null });
     }
     $('set-dir').value = dir;
-    if (settings.dock) await setDock(true);
-    else showDock();
+    // Always: it also shows a window that was started hidden by autostart.
+    await setDock(settings.dock);
+    // Rewrites the Run entry so a moved exe keeps starting.
+    if (settings.autostart) await invoke('set_autostart', { on: true });
     await refresh();
   });
   watchGallery();

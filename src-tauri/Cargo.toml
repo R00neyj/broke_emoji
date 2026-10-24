@@ -7,7 +7,8 @@ edition = "2021"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+# tray-icon: tray icon (open / quit) while the gallery waits hidden in the background.
+tauri = { version = "2", features = ["tray-icon"] }
 serde = { version = "1", features = ["derive"] }
 # Clipboard image write (CF_DIBV5/PNG) so the result pastes straight into KakaoTalk.
 arboard = "3"
@@ -17,11 +18,14 @@ drag = "2"
 [target.'cfg(windows)'.dependencies]
 # Left-button state check before a native drag, the screen color picker
 # (cursor position + screen pixel), and docking beside the KakaoTalk chat room
-# (WinEvent hooks, process name, window bounds). Already in the tree via tauri.
+# (WinEvent hooks, process name, window bounds), autostart (Run registry key)
+# and single-instance (named mutex). Already in the tree via tauri.
 windows-sys = { version = "0.61", features = [
   "Win32_Foundation",
   "Win32_Graphics_Dwm",
   "Win32_Graphics_Gdi",
+  "Win32_Security",
+  "Win32_System_Registry",
   "Win32_System_Threading",
   "Win32_UI_Accessibility",
   "Win32_UI_Input_KeyboardAndMouse",
