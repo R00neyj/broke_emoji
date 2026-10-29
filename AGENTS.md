@@ -9,7 +9,7 @@
 Core flow:
 
 1. User adds an image (file pick / drag-and-drop / paste).
-2. App processes it: removes a flat background (e.g. the chat background captured in a screenshot), trims, caps the longest side at 360 px, and stores a transparent PNG.
+2. App processes it: optionally removes a flat background (e.g. the chat background captured in a screenshot) and stores a PNG. Contain/cover modes trim after successful background removal and cap the longest side at 360 px; original mode preserves the input canvas dimensions and margins, including when background removal is enabled.
 3. Result appears in a gallery styled after KakaoTalk's emoticon window, previewed on the user's chat background color.
 4. One click composites the image onto the user's chat background color at the output canvas size and copies it to the clipboard.
 
@@ -36,7 +36,7 @@ Core flow:
 | --- | --- | --- |
 | Reference size | 360×360 | KakaoTalk spec |
 | Output canvas | Square, default 120×120, padding 0% (user setting) | Needs calibration |
-| Image fit | Contain (default, whole image + background padding), cover (center-cropped square), or original (stored image's own size, no canvas/scaling; size and padding ignored); global setting | Decided |
+| Image fit | Contain (default, whole image + background padding), cover (center-cropped square), or original (preserves input dimensions/margins on import, no auto-trimming or 360px cap; copies at stored size; output size and padding ignored); global setting | Decided |
 | Background | Opaque, user's chat background color (default `#BACEE0`) | Decided |
 | Format | Stored: transparent PNG. Clipboard: opaque bitmap | Decided |
 
