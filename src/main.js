@@ -595,6 +595,7 @@ const canvasOf = (w, h) => {
 };
 
 async function processImage(blob) {
+  const keepOriginalSize = settings.fit === 'original';
   const bmp = await createImageBitmap(blob);
   let c = canvasOf(bmp.width, bmp.height);
   let ctx = c.getContext('2d', { willReadFrequently: true });
@@ -605,14 +606,16 @@ async function processImage(blob) {
     const data = ctx.getImageData(0, 0, c.width, c.height);
     if (removeBackground(data, settings.tol)) {
       ctx.putImageData(data, 0, 0);
-      const b = alphaBBox(data);
-      const t = canvasOf(b.w, b.h);
-      t.getContext('2d').drawImage(c, b.x, b.y, b.w, b.h, 0, 0, b.w, b.h);
-      c = t;
+      if (!keepOriginalSize) {
+        const b = alphaBBox(data);
+        const t = canvasOf(b.w, b.h);
+        t.getContext('2d').drawImage(c, b.x, b.y, b.w, b.h, 0, 0, b.w, b.h);
+        c = t;
+      }
     }
   }
 
-  const scale = Math.min(1, STORE_MAX / Math.max(c.width, c.height));
+  const scale = keepOriginalSize ? 1 : Math.min(1, STORE_MAX / Math.max(c.width, c.height));
   if (scale < 1) {
     const t = canvasOf(Math.max(1, Math.round(c.width * scale)), Math.max(1, Math.round(c.height * scale)));
     ctx = t.getContext('2d');
