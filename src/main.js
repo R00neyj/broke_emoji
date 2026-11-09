@@ -185,6 +185,7 @@ async function renderGrid() {
   const grid = $('grid');
   const tab = tabs.find((t) => t.name === current);
   if (!tab || !tab.files.length) {
+    hidePeek();
     grid.replaceChildren(el('p', 'empty', '이미지를 끌어다 놓거나\nCtrl+V로 붙여넣으세요'));
     return;
   }
@@ -200,6 +201,7 @@ async function renderGrid() {
       else run(() => copyImage(img, cell));
     };
     cell.onpointerdown = (e) => {
+      hidePeek();
       if (e.button !== 0) return;
       if (!selection) dragFrom = { x: e.clientX, y: e.clientY, img };
       clearTimeout(pressTimer);
@@ -213,6 +215,7 @@ async function renderGrid() {
       }, LONG_PRESS_MS);
     };
     cell.oncontextmenu = (e) => {
+      hidePeek();
       if (selection) return;
       showMenu(e.clientX, e.clientY, [
         ['복사', () => run(() => copyImage(img, cell))],
@@ -222,10 +225,52 @@ async function renderGrid() {
         ['삭제', () => run(() => deleteImages(tab.name, [name]))],
       ]);
     };
+    cell.onpointerenter = (e) => { if (e.pointerType === 'mouse') schedulePeek(cell, img); };
+    cell.onpointerleave = hidePeek;
     return cell;
   }));
+  hidePeek();
   grid.replaceChildren(...cells);
 }
+
+// ---------- hover preview ----------
+
+// Hovering a cell briefly shows an enlarged copy above or below it, so small
+// details can be checked without opening the crop view.
+const PEEK_DELAY_MS = 350;
+const PEEK_MAX = 220;
+const PEEK_GAP = 6;
+let peekTimer;
+
+function schedulePeek(cell, img) {
+  clearTimeout(peekTimer);
+  peekTimer = setTimeout(() => showPeek(cell, img), PEEK_DELAY_MS);
+}
+
+function showPeek(cell, img) {
+  if (!cell.isConnected || !img.naturalWidth) return;
+  const r = cell.getBoundingClientRect();
+  const above = r.top - PEEK_GAP * 2;
+  const below = innerHeight - r.bottom - PEEK_GAP * 2;
+  const size = Math.min(PEEK_MAX, innerWidth - PEEK_GAP * 2, Math.max(above, below));
+  if (size <= r.width) return; // no room for anything bigger than the cell itself
+  const peek = $('peek');
+  peek.firstElementChild.src = img.src;
+  Object.assign(peek.style, {
+    width: size + 'px',
+    height: size + 'px',
+    left: Math.max(PEEK_GAP, Math.min(r.left + r.width / 2 - size / 2, innerWidth - size - PEEK_GAP)) + 'px',
+    top: (below >= above ? r.bottom + PEEK_GAP : r.top - PEEK_GAP - size) + 'px',
+  });
+  peek.hidden = false;
+}
+
+function hidePeek() {
+  clearTimeout(peekTimer);
+  $('peek').hidden = true;
+}
+$('grid').addEventListener('scroll', hidePeek);
+addEventListener('blur', hidePeek);
 
 // ---------- multi-select (long press) ----------
 
