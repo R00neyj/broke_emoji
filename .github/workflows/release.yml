@@ -40,13 +40,24 @@ jobs:
           path: ~\AppData\Local\tauri
           key: tauri-nsis-3.13
 
+      # The web URL of nsis_tauri_utils.dll answers 504 for long stretches while the API download
+      # works; put the file where the Tauri bundler looks so it skips its own download.
+      - name: Pre-fetch nsis_tauri_utils.dll
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $dir = "$env:LOCALAPPDATA\tauri\NSIS\Plugins\x86-unicode\additional"
+          New-Item -ItemType Directory -Force $dir | Out-Null
+          gh release download nsis_tauri_utils-v0.5.3 -R tauri-apps/nsis-tauri-utils -p nsis_tauri_utils.dll -D $dir --clobber
+
       - name: Build installer (retry on download errors)
         shell: pwsh
         run: |
-          for ($i = 1; $i -le 3; $i++) {
+          for ($i = 1; $i -le 5; $i++) {
             npm run build:installer
             if ($LASTEXITCODE -eq 0) { break }
-            Start-Sleep 20
+            Start-Sleep 60
           }
           exit $LASTEXITCODE
 
