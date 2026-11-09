@@ -49,7 +49,7 @@
 - **창:** 작고 크기 조절 가능. 기본·최소 340×320(4열이 들어가는 크기). 갤러리 셀은 카톡 이모티콘 창과 같은 70px, 간격 10px로 고정하고, 창을 넓히면 열이 늘어난다.
 - **카톡 옆에 붙이기:** 상단 버튼(설정 `dock`)으로 갤러리를 카톡 PC의 활성 채팅방 옆에 붙인다. 채팅방이 맨 앞 창이 되면 갤러리가 채팅방과 같은 높이가 되어(위·아래 끝 정렬, 너비는 유지, 창 최소 높이가 더 크면 아래쪽 끝만 맞춤) 옆에 붙고 포커스를 뺏지 않은 채 채팅방 바로 위로 올라오며, 채팅방을 옮기거나 크기를 바꾸면(높이 포함) 따라간다. 따라가던 채팅방을 최소화하면 갤러리도 (활성화 없이) 최소화되고, 채팅방이 복원되거나 활성화되면 다시 나온다. 사용자가 직접 최소화한 갤러리는 그대로 둔다. 붙는 쪽은 설정(`dockSide`, 기본 오른쪽)이고 모니터 밖으로 나가면 반대쪽에 붙는다. `windows-sys`의 out-of-context WinEvent 훅 사용(주입 없음, 새 crate 없음). 채팅방 = `KakaoTalk.exe`의 보이는 최상위 창 중 최소화 가능하고, 항상 위·툴 창이 아니며, `RICHEDIT50W`를 가진 창. 메인 창(친구 목록)과 알림 팝업은 무시한다. Windows 전용.
 - **채팅방 닫힘:** 따라가던 채팅방이 닫히고(창 destroy 또는 hide) 다른 열린 채팅방이 없으면 갤러리가 숨고, 트레이 아이콘(항상 표시, 메뉴: 열기 / 종료, 왼쪽 클릭은 열기)으로 앱이 계속 실행된다. 채팅방이 다시 열리면 갤러리가 다시 나타난다(새 채팅방은 맨 앞이 된 뒤에 입력창이 만들어져서 타이머로 다시 찾는다). 추가된 것은 `tauri`의 `tray-icon` feature뿐이다.
-- **자동 실행:** 설정 `autostart`(기본 꺼짐)가 켜지면 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`에 `거지티콘` = `"<exe>" --autostart`를 쓴다(켜져 있는 동안 시작할 때마다 다시 써서 exe를 옮겨도 동작). `windows-sys` 레지스트리 feature 사용, 새 crate 없음. `--autostart`로 시작하면 채팅방이 열릴 때까지 갤러리 창이 숨겨진다(붙이기가 꺼져 있으면 트레이가 없으므로 바로 보여줌). 데이터 폴더 밖에 쓰는 유일한 항목이며 사용자가 켰을 때만 쓴다.
+- **자동 실행:** 설정 `autostart`(기본 꺼짐)가 켜지면 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`에 `거지티콘` = `"<exe>" --autostart`를 쓴다(켜져 있는 동안 시작할 때마다 다시 써서 exe를 옮겨도 동작). `windows-sys` 레지스트리 feature 사용, 새 crate 없음. `--autostart`로 시작하면 채팅방이 열릴 때까지 갤러리 창이 숨겨진다(붙이기가 꺼져 있으면 트레이가 없으므로 바로 보여줌). 앱 자체가 데이터 폴더 밖에 쓰는 유일한 항목이며 사용자가 켰을 때만 쓴다(설치 파일이 따로 쓰는 항목은 포터블 항목 참고).
 - **단일 실행:** 이름 있는 뮤텍스로 한 개만 실행된다. 두 번째 실행은 실행 중인 창(트레이에 숨은 것 포함)을 보여주고 종료한다.
 - **테마:** 설정에서 시스템(기본, OS 라이트/다크를 실시간으로 따름)/라이트/다크 선택. `<html>`의 `data-theme`와 네이티브 타이틀바에 적용한다. 색은 `:root`의 CSS 변수로 관리하고 UI 색을 하드코딩하지 않는다.
 - **드래그 내보내기:** 셀을 창 밖으로 끌면 합성된 PNG를 `<data>/drag/`에 저장하고 네이티브 파일 드래그(crate `drag`)를 시작해 카톡 채팅창에 떨어뜨릴 수 있다. 드롭 대상이 나중에 파일을 읽을 수 있으므로 이 폴더는 드래그마다가 아니라 앱 시작 시 비운다.
@@ -62,14 +62,14 @@
 ## 빌드
 
 - 사전 준비(Windows): Rust(MSVC 툴체인), C++ 워크로드가 포함된 Visual Studio Build Tools, Node.js(Tauri CLI 용도로만).
-- `npm install` 후 `npm run dev`로 실행, `npm run build`로 포터블 `src-tauri/target/release/거지티콘.exe` 생성(`--no-bundle`), `npm run build:installer`로 `src-tauri/target/release/bundle/nsis/`에 NSIS 설치 파일 생성. 설치 파일은 사용자 단위(`installMode: currentUser`, 관리자 권한 불필요)로 `%LOCALAPPDATA%\Programs`에 설치되고 시작 메뉴 항목이 생겨 윈도우 검색에 나타난다. 릴리스 워크플로는 `broke_emoji-<태그>.exe`와 `broke_emoji-<태그>-setup.exe`를 둘 다 올린다.
+- `npm install` 후 `npm run dev`로 실행, `npm run build`로 포터블 `src-tauri/target/release/거지티콘.exe` 생성(`--no-bundle`), `npm run build:installer`로 `src-tauri/target/release/bundle/nsis/`에 NSIS 설치 파일 생성. 설치 파일은 사용자 단위(`installMode: currentUser`, 관리자 권한 불필요)로 `%LOCALAPPDATA%\거지티콘`에 설치되고 시작 메뉴 항목이 생겨 윈도우 검색에 나타난다. 릴리스 워크플로는 `broke_emoji-<태그>.exe`와 `broke_emoji-<태그>-setup.exe`를 둘 다 올린다.
 
 ## 저장
 
 - 갤러리는 **영구 유지, 폴더 기반**이다: 디스크의 갤러리 폴더 하나가 기준(source of truth)이다.
 - 가공된 이미지는 해당 폴더에 PNG 파일로 저장하고, 앱 시작 시 폴더 내용을 갤러리에 표시한다. 탐색기에서 파일·폴더를 추가/교체/삭제한 외부 변경은 창이 최소화되지 않은 동안 1.5초마다 폴더 지문을 확인해 자동 반영한다. 감시(watcher) 크레이트나 수동 새로고침 버튼은 두지 않는다.
 - 필요해지기 전까지 DB나 별도 인덱스 파일을 두지 않는다. 폴더 자체가 상태다.
-- **포터블:** 모든 데이터는 exe 옆 `거지티콘_data/`에 둔다: `settings.json`, 기본 갤러리 `gallery/`, WebView2 프로필 `webview/`. AppData에는 아무것도 쓰지 않는다. exe와 이 폴더를 같이 옮기면 앱 전체가 옮겨진다. 설치본도 같은 방식이다: 데이터 폴더는 사용자 단위 설치 폴더 안에 생긴다(쓰기 가능, 관리자 권한 불필요).
+- **포터블:** 모든 데이터는 exe 옆 `거지티콘_data/`에 둔다: `settings.json`, 기본 갤러리 `gallery/`, WebView2 프로필 `webview/`. 포터블 exe는 AppData에 아무것도 쓰지 않는다. exe와 이 폴더를 같이 옮기면 앱 전체가 옮겨진다. 설치본도 같은 방식이다: 데이터 폴더는 `%LOCALAPPDATA%\거지티콘`에 생긴다(쓰기 가능, 관리자 권한 불필요). 설치 파일은 추가로 시작 메뉴 바로가기와 HKCU 제거 정보 키를 쓴다. 제거는 비재귀 `RMDir`이라 `거지티콘_data/`(와 그것이 든 설치 폴더)는 남고, 제거 프로그램의 "앱 데이터 삭제" 옵션은 `%LOCALAPPDATA%\com.yoonjinwon.makeemoji`만 지우며 갤러리는 건드리지 않는다.
 - 갤러리 폴더 위치: 기본 `gallery`(상대 경로는 데이터 폴더 기준), 설정에서 변경 가능. 하위 폴더 하나가 탭 하나이고(탭 바에서 추가/이름 변경/빈 탭 삭제), 루트의 PNG는 기본 탭이며 이름을 바꿀 수 없다.
 
 ## 문서 규칙

@@ -539,8 +539,9 @@ async fn open_settings(app: tauri::AppHandle, data: State<'_, DataDir>) -> Resul
     builder
         .title(format!("{APP_NAME} 설정"))
         // Tall enough to show every setting without scrolling (content ≈ 685px at 360 wide
-        // before the dock-side row was added; one more row fits in the extra 40px).
-        .inner_size(360.0, 740.0)
+        // before the dock-side row was added; each extra row ≈ 40px, so 820 fits the
+        // dock-side, update-check checkbox and update status rows too).
+        .inner_size(360.0, 820.0)
         .min_inner_size(320.0, 400.0)
         .disable_drag_drop_handler()
         // Must match the main window: WebView2 allows one profile per process.
