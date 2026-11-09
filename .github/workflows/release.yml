@@ -40,14 +40,23 @@ jobs:
           path: ~\AppData\Local\tauri
           key: tauri-nsis-3.13
 
-      # The web URL of nsis_tauri_utils.dll answers 504 for long stretches while the API download
-      # works; put the file where the Tauri bundler looks so it skips its own download.
-      - name: Pre-fetch nsis_tauri_utils.dll
+      # github.com download URLs of the NSIS toolset answer 504 for long stretches while the API
+      # download works. Lay out the toolset where the Tauri bundler looks so it skips its own
+      # downloads (a lone DLL is not enough: it recreates the folder when files are missing).
+      - name: Pre-fetch NSIS toolset
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $dir = "$env:LOCALAPPDATA\tauri\NSIS\Plugins\x86-unicode\additional"
+          $tools = "$env:LOCALAPPDATA\tauri"
+          if (-not (Test-Path "$tools\NSIS\makensis.exe")) {
+            New-Item -ItemType Directory -Force $tools | Out-Null
+            gh release download nsis-3.13 -R tauri-apps/binary-releases -p nsis-3.13.zip -D $tools --clobber
+            Expand-Archive "$tools\nsis-3.13.zip" -DestinationPath $tools -Force
+            if (Test-Path "$tools\NSIS") { Remove-Item "$tools\NSIS" -Recurse -Force }
+            Rename-Item "$tools\nsis-3.13" "NSIS"
+          }
+          $dir = "$tools\NSIS\Plugins\x86-unicode\additional"
           New-Item -ItemType Directory -Force $dir | Out-Null
           gh release download nsis_tauri_utils-v0.5.3 -R tauri-apps/nsis-tauri-utils -p nsis_tauri_utils.dll -D $dir --clobber
 
