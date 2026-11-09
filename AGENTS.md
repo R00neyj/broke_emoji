@@ -23,7 +23,7 @@ Core flow:
 
 - **Lightweight first.** Prefer the lightest language/runtime that does the job. Minimize dependencies, install steps, and binary/bundle size. Every new dependency needs a reason.
 - **Boring and small.** No frameworks or abstractions unless they remove more code than they add.
-- **Local only.** Images never leave the user's machine. No network calls, no telemetry.
+- **Local only.** Images never leave the user's machine. No telemetry. The one network call is the update check (a GitHub latest-release query from the settings window's button, or at start when `updateCheck` is on, default off); nothing is sent besides that request and nothing is downloaded or installed automatically.
 
 ## Image Size Rules
 
@@ -57,19 +57,19 @@ Core flow:
 - **Hover preview:** resting the mouse on a cell for 350 ms shows an enlarged copy (up to 220 px, on the chat background) above or below it, whichever has more room; it ignores the pointer and hides on leave, press, right-click, or scroll.
 - **Crop:** right-click → 자르기 opens a crop view (drag to move; any edge or corner resizes with the opposite side fixed; square lock on by default, where an edge drag keeps the box centered on the other axis and shifts it to stay inside). The box may extend past the image up to a square of the image's long side; that area stays transparent and gets the chat background on copy. "새로 저장" adds the crop as a new image; "덮어쓰기" replaces the stored PNG (irreversible).
 - **Magic-wand erase:** right-click → 투명 처리 opens an erase view previewed on the chat background. Clicking makes the connected area of similar color (within the background tolerance setting) transparent, with the same rim un-blending as automatic removal; covers pockets the automatic pass keeps (e.g. inside "ㅇ" on white). 되돌리기 undoes clicks; "새로 저장" / "덮어쓰기" as in crop.
-- **Settings window:** the gear opens a separate window (same page, `window.__MODE__ = 'settings'`, owned by the gallery window). Both windows write `settings.json` and sync via the `settings-changed` event; closing the gallery quits the app. Background presets are KakaoTalk's 15 built-in chat colors.
+- **Settings window:** the gear opens a separate window (same page, `window.__MODE__ = 'settings'`, owned by the gallery window). Both windows write `settings.json` and sync via the `settings-changed` event; closing the gallery quits the app. Background presets are KakaoTalk's 15 built-in chat colors. **Update check:** the "업데이트 확인" button fetches `https://api.github.com/repos/R00neyj/broke_emoji/releases/latest` from the webview, compares `tag_name` with the app version, and offers to open the releases page (`open_release_page`, fixed URL); the `updateCheck` checkbox (default off) does the same silently at start and only shows a toast when a newer version exists.
 
 ## Build
 
 - Prerequisites (Windows): Rust (MSVC toolchain), Visual Studio Build Tools with the C++ workload, Node.js (only for the Tauri CLI).
-- `npm install`, then `npm run dev` to run, `npm run build` to produce `src-tauri/target/release/거지티콘.exe` (no installer bundle).
+- `npm install`, then `npm run dev` to run, `npm run build` to produce the portable `src-tauri/target/release/거지티콘.exe` (`--no-bundle`), `npm run build:installer` to produce the NSIS installer in `src-tauri/target/release/bundle/nsis/`. The installer is per-user (`installMode: currentUser`, no admin rights), installs under `%LOCALAPPDATA%\Programs`, and adds a Start menu entry so the app shows up in Windows search; the release workflow uploads both `broke_emoji-<tag>.exe` and `broke_emoji-<tag>-setup.exe`.
 
 ## Storage
 
 - The gallery is **persistent and folder-based**: one gallery folder on disk is the source of truth.
 - Processed images are saved as PNG files in that folder; the gallery lists the folder's contents on startup and picks up outside changes (files/folders added, replaced, or removed in Explorer) automatically by polling a folder fingerprint every 1.5 s while the window is not minimized. No watcher crate; no manual refresh button.
 - No database or separate index file unless needed later; the folder itself is the state.
-- **Portable:** everything lives in `거지티콘_data/` next to the exe: `settings.json`, the default gallery `gallery/`, and the WebView2 profile `webview/`. Nothing is written to AppData. Moving the exe together with that folder moves the whole app.
+- **Portable:** everything lives in `거지티콘_data/` next to the exe: `settings.json`, the default gallery `gallery/`, and the WebView2 profile `webview/`. Nothing is written to AppData. Moving the exe together with that folder moves the whole app. The installed copy works the same way: its data folder sits in the per-user install folder (writable, no admin needed).
 - Gallery folder location: default `gallery` (relative paths resolve against the data folder), changeable in settings. Each subfolder is a tab (add / rename / delete-if-empty from the tab bar); PNGs in the root form the default tab, which cannot be renamed.
 
 ## Documentation Rules

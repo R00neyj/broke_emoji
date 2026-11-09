@@ -8,7 +8,7 @@ const { removeBackground, eraseAt, alphaBBox, fitBox } = window.imaging;
 const STORE_MAX = 360;
 const KAKAO_DEFAULT_BG = '#bacee0';
 
-const DEFAULTS = { bg: KAKAO_DEFAULT_BG, size: 120, pad: 0, fit: 'contain', removeBg: true, tol: 24, dock: false, dockSide: 'right', autostart: false, dir: '', theme: 'system' };
+const DEFAULTS = { bg: KAKAO_DEFAULT_BG, size: 120, pad: 0, fit: 'contain', removeBg: true, tol: 24, dock: false, dockSide: 'right', autostart: false, updateCheck: false, dir: '', theme: 'system' };
 // settings.json next to the exe, injected by the backend before this script runs.
 const settings = { ...DEFAULTS, ...parseSettings(window.__SETTINGS__) };
 delete settings.pinned; // replaced by dock
@@ -833,6 +833,43 @@ $('set-theme').onchange = (e) => { settings.theme = e.target.value; saveSettings
 applyTheme();
 $('set-dock-side').onchange = (e) => { settings.dockSide = e.target.value; saveSettings(); };
 $('set-autostart').onchange = (e) => { settings.autostart = e.target.checked; saveSettings(); };
+$('set-update-check').onchange = (e) => { settings.updateCheck = e.target.checked; saveSettings(); };
+
+// ---------- update check ----------
+
+// The only network call: asks GitHub for the latest release (manual button, or at start when enabled).
+const LATEST_RELEASE_API = 'https://api.github.com/repos/R00neyj/broke_emoji/releases/latest';
+const versionParts = (v) => String(v).replace(/^v/i, '').split('.').map((n) => parseInt(n, 10) || 0);
+function isNewer(a, b) {
+  const [x, y] = [versionParts(a), versionParts(b)];
+  for (let i = 0; i < Math.max(x.length, y.length); i++) {
+    if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0);
+  }
+  return false;
+}
+// Returns the newer release tag, or '' when up to date.
+async function checkUpdate() {
+  const res = await fetch(LATEST_RELEASE_API, { headers: { Accept: 'application/vnd.github+json' } });
+  if (!res.ok) throw new Error(`업데이트 정보를 가져오지 못했어요 (${res.status})`);
+  const tag = (await res.json()).tag_name;
+  return isNewer(tag, await window.__TAURI__.app.getVersion()) ? tag : '';
+}
+let latestTag = '';
+$('btn-update').onclick = () => run(async () => {
+  if (latestTag) return invoke('open_release_page');
+  $('btn-update').disabled = true;
+  $('update-status').textContent = '확인 중…';
+  try {
+    latestTag = await checkUpdate();
+  } catch (e) {
+    $('update-status').textContent = '';
+    throw e;
+  } finally {
+    $('btn-update').disabled = false;
+  }
+  $('update-status').textContent = latestTag ? `새 버전 ${latestTag} 이(가) 있어요` : '최신 버전이에요';
+  if (latestTag) $('btn-update').textContent = '다운로드 페이지 열기';
+});
 
 $('btn-dir-apply').onclick = () => run(async () => {
   const dir = await invoke('open_gallery', { dir: $('set-dir').value });
@@ -861,6 +898,7 @@ function syncFromSettings() {
   $('set-theme').value = settings.theme;
   $('set-dock-side').value = settings.dockSide;
   $('set-autostart').checked = settings.autostart;
+  $('set-update-check').checked = settings.updateCheck;
   applyFit();
   applyTheme();
 }
@@ -907,6 +945,9 @@ $('btn-settings').onclick = () => run(() => invoke('open_settings'));
     await setDock(settings.dock);
     // Rewrites the Run entry so a moved exe keeps starting.
     if (settings.autostart) await invoke('set_autostart', { on: true });
+    if (settings.updateCheck) {
+      checkUpdate().then((tag) => tag && toast(`새 버전 ${tag} 이(가) 있어요 · 설정에서 받을 수 있어요`, false, 8000)).catch(() => {});
+    }
     await refresh();
   });
   watchGallery();

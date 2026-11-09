@@ -235,6 +235,16 @@ fn reveal_gallery(state: State<Gallery>) -> Result<(), String> {
         .map_err(err)
 }
 
+/// Opens the project's releases page in the default browser (fixed URL, never caller-supplied).
+#[tauri::command]
+fn open_release_page() -> Result<(), String> {
+    std::process::Command::new("explorer")
+        .arg("https://github.com/R00neyj/broke_emoji/releases/latest")
+        .spawn()
+        .map(|_| ())
+        .map_err(err)
+}
+
 /// Puts an opaque RGBA bitmap on the clipboard as image data (not a file path).
 #[tauri::command]
 fn copy_image(width: usize, height: usize, rgba: Vec<u8>) -> Result<(), String> {
@@ -603,7 +613,8 @@ fn main() {
             pick_screen_color,
             set_dock,
             set_autostart,
-            open_settings
+            open_settings,
+            open_release_page
         ])
         .setup(move |app| {
             let webview_dir = data.join("webview");

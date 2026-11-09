@@ -29,6 +29,12 @@ jobs:
 
       - run: npm run build
 
+      - run: npm run build:installer
+
+      - name: Rename setup (ASCII asset name)
+        shell: pwsh
+        run: Copy-Item (Get-ChildItem "src-tauri/target/release/bundle/nsis/*-setup.exe").FullName "broke_emoji-${{ github.ref_name }}-setup.exe"
+
       - name: Rename exe (ASCII asset name)
         shell: pwsh
         run: Copy-Item "src-tauri/target/release/거지티콘.exe" "broke_emoji-${{ github.ref_name }}.exe"
