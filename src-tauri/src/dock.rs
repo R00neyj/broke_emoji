@@ -264,9 +264,10 @@ unsafe fn closed() {
     arm();
 }
 
-/// Moves the gallery beside `chat`, bottom edges aligned, keeping the gallery's own
-/// size (preferred side, else the other side if it would leave the monitor's work area); `raise` also puts it
-/// right above the chat room. Never activates the gallery.
+/// Moves the gallery beside `chat` and gives it the chat room's height, top and bottom
+/// aligned, width kept (if the window's minimum height wins, only bottoms stay aligned).
+/// Preferred side, else the other side if it would leave the monitor's work area; `raise`
+/// also puts it right above the chat room. Never activates the gallery.
 unsafe fn place(chat: HWND, raise: bool) {
     let main = MAIN.load(Ordering::Relaxed) as HWND;
     // Minimized windows report a parking position; leave a minimized gallery alone.
@@ -280,7 +281,6 @@ unsafe fn place(chat: HWND, raise: bool) {
     let vis = frame(main);
     let (inset_l, inset_t) = (vis.left - outer.left, vis.top - outer.top);
     let width = vis.right - vis.left;
-    let height = vis.bottom - vis.top;
 
     let mut mi: MONITORINFO = std::mem::zeroed();
     mi.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
@@ -290,13 +290,16 @@ unsafe fn place(chat: HWND, raise: bool) {
     let fits_right = chat_r.right + width <= work.right;
     let left = if LEFT.load(Ordering::Relaxed) { fits_left || !fits_right } else { !fits_right && fits_left };
     let x = if left { chat_r.left - width } else { chat_r.right };
-    // Bottom-aligned with the chat room; never above the top of the work area.
-    let y = (chat_r.bottom - height).max(work.top);
+    // Same height as the chat room, top and bottom aligned.
+    let height = chat_r.bottom - chat_r.top;
+    let y = chat_r.top;
+    let outer_w = outer.right - outer.left;
+    let outer_h = height + (outer.bottom - outer.top) - (vis.bottom - vis.top);
 
     // HWND_TOP is ignored while another process owns the foreground, but inserting
     // after the window right above the chat room is honored. Inserting after a
     // topmost window would make the gallery topmost, so fall back to HWND_TOP then.
-    let mut flags = SWP_NOACTIVATE | SWP_NOSIZE;
+    let mut flags = SWP_NOACTIVATE;
     let mut after = HWND_TOP;
     if raise {
         let above = GetWindow(chat, GW_HWNDPREV);
@@ -308,15 +311,13 @@ unsafe fn place(chat: HWND, raise: bool) {
     } else {
         flags |= SWP_NOZORDER;
     }
-    SetWindowPos(
-        main,
-        after,
-        x - inset_l,
-        y - inset_t,
-        0,
-        0,
-        flags,
-    );
+    SetWindowPos(main, after, x - inset_l, y - inset_t, outer_w, outer_h, flags);
+    // The window's minimum height may keep it taller than the chat room; keep bottoms aligned then.
+    let now = frame(main);
+    let y2 = (chat_r.bottom - (now.bottom - now.top)).max(work.top);
+    if now.top != y2 {
+        SetWindowPos(main, std::ptr::null_mut(), x - inset_l, y2 - inset_t, 0, 0, SWP_NOACTIVATE | SWP_NOSIZE | SWP_NOZORDER);
+    }
 }
 
 /// Visible window bounds (excludes DWM's invisible resize borders).
