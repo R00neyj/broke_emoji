@@ -29,15 +29,30 @@ jobs:
 
       - run: npm run build
 
-      - run: npm run build:installer
+      # Copy before the installer build, which patches bundle info into the exe.
+      - name: Rename exe (ASCII asset name)
+        shell: pwsh
+        run: Copy-Item "src-tauri/target/release/거지티콘.exe" "broke_emoji-${{ github.ref_name }}.exe"
+
+      # NSIS tools are downloaded from GitHub releases, which occasionally answer 504.
+      - uses: actions/cache@v4
+        with:
+          path: ~\AppData\Local\tauri
+          key: tauri-nsis-3.13
+
+      - name: Build installer (retry on download errors)
+        shell: pwsh
+        run: |
+          for ($i = 1; $i -le 3; $i++) {
+            npm run build:installer
+            if ($LASTEXITCODE -eq 0) { break }
+            Start-Sleep 20
+          }
+          exit $LASTEXITCODE
 
       - name: Rename setup (ASCII asset name)
         shell: pwsh
         run: Copy-Item (Get-ChildItem "src-tauri/target/release/bundle/nsis/*-setup.exe").FullName "broke_emoji-${{ github.ref_name }}-setup.exe"
-
-      - name: Rename exe (ASCII asset name)
-        shell: pwsh
-        run: Copy-Item "src-tauri/target/release/거지티콘.exe" "broke_emoji-${{ github.ref_name }}.exe"
 
       - uses: actions/upload-artifact@v4
         with:
