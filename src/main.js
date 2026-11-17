@@ -219,6 +219,7 @@ async function renderGrid() {
       if (selection) return;
       showMenu(e.clientX, e.clientY, [
         ['복사', () => run(() => copyImage(img, cell))],
+        ['원본 크기로 복사', () => run(() => copyImage(img, cell, true))],
         ['자르기', () => openCropper(tab.name, name, img)],
         ['투명 처리 (클릭해서 지우기)', () => openEraser(tab.name, name, img)],
         ['여러 개 선택', () => { selection = new Set(); toggleSelected(name, cell); }],
@@ -566,13 +567,13 @@ async function run(fn) {
 
 // Composites the stored (transparent) image onto the chat background color so
 // KakaoTalk cannot add its own white/black backdrop.
-function composite(img) {
+function composite(img, original = settings.fit === 'original') {
   const w = img.naturalWidth;
   const h = img.naturalHeight;
   const c = document.createElement('canvas');
   const ctx = c.getContext('2d');
   // "original": paste at the stored image's own size, no canvas or scaling.
-  if (settings.fit === 'original') {
+  if (original) {
     c.width = w;
     c.height = h;
     ctx.fillStyle = settings.bg;
@@ -596,8 +597,8 @@ function composite(img) {
   return c;
 }
 
-async function copyImage(img, cell) {
-  const c = composite(img);
+async function copyImage(img, cell, original) {
+  const c = composite(img, original);
   const { data } = c.getContext('2d').getImageData(0, 0, c.width, c.height);
   await invoke('copy_image', { width: c.width, height: c.height, rgba: Array.from(data) });
   cell.classList.remove('copied');
