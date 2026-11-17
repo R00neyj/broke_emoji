@@ -838,7 +838,7 @@ $('set-update-check').onchange = (e) => { settings.updateCheck = e.target.checke
 
 // ---------- update check ----------
 
-// The only network call: asks GitHub for the latest release (manual button, or at start when enabled).
+// Network calls: asks GitHub for the latest release (manual button, or at start when enabled), and downloads the new version when the user confirms.
 const LATEST_RELEASE_API = 'https://api.github.com/repos/R00neyj/broke_emoji/releases/latest';
 const versionParts = (v) => String(v).replace(/^v/i, '').split('.').map((n) => parseInt(n, 10) || 0);
 function isNewer(a, b) {
@@ -857,8 +857,21 @@ async function checkUpdate() {
 }
 let latestTag = '';
 $('btn-update').onclick = () => run(async () => {
-  if (latestTag) return invoke('open_release_page');
-  $('btn-update').disabled = true;
+  const btn = $('btn-update');
+  if (latestTag) {
+    // Confirmed: download, install and restart. On success the app exits and the new version starts.
+    btn.disabled = true;
+    $('update-status').textContent = '설치 중… 곧 다시 시작돼요';
+    try {
+      await invoke('install_update', { tag: latestTag });
+    } catch (e) {
+      btn.disabled = false;
+      $('update-status').textContent = '';
+      throw e;
+    }
+    return;
+  }
+  btn.disabled = true;
   $('update-status').textContent = '확인 중…';
   try {
     latestTag = await checkUpdate();
@@ -866,10 +879,10 @@ $('btn-update').onclick = () => run(async () => {
     $('update-status').textContent = '';
     throw e;
   } finally {
-    $('btn-update').disabled = false;
+    btn.disabled = false;
   }
-  $('update-status').textContent = latestTag ? `새 버전 ${latestTag} 이(가) 있어요` : '최신 버전이에요';
-  if (latestTag) $('btn-update').textContent = '다운로드 페이지 열기';
+  $('update-status').textContent = latestTag ? `새 버전 ${latestTag}` : '최신 버전이에요';
+  if (latestTag) btn.textContent = '지금 업데이트';
 });
 
 $('btn-dir-apply').onclick = () => run(async () => {
@@ -947,7 +960,7 @@ $('btn-settings').onclick = () => run(() => invoke('open_settings'));
     // Rewrites the Run entry so a moved exe keeps starting.
     if (settings.autostart) await invoke('set_autostart', { on: true });
     if (settings.updateCheck) {
-      checkUpdate().then((tag) => tag && toast(`새 버전 ${tag} 이(가) 있어요 · 설정에서 받을 수 있어요`, false, 8000)).catch(() => {});
+      checkUpdate().then((tag) => tag && toast(`새 버전 ${tag} 이(가) 있어요 · 설정에서 업데이트할 수 있어요`, false, 8000)).catch(() => {});
     }
     await refresh();
   });

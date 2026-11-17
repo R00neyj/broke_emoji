@@ -19,6 +19,10 @@ use tauri::{ipc::Response, Manager, State, WebviewUrl, WebviewWindow, WebviewWin
 const APP_NAME: &str = "거지티콘";
 /// Argument of the Run-key command: start hidden until a KakaoTalk chat room opens.
 const AUTOSTART_ARG: &str = "--autostart";
+/// Argument of a freshly swapped portable exe: wait for the old process to release the instance mutex.
+const UPDATED_ARG: &str = "--updated";
+/// Where release assets of this project are published (the update downloads only from here).
+const RELEASE_DOWNLOAD: &str = "https://github.com/R00neyj/broke_emoji/releases/download";
 
 /// Portable data folder next to the exe: settings, default gallery, WebView2 profile.
 struct DataDir(PathBuf);
@@ -235,14 +239,99 @@ fn reveal_gallery(state: State<Gallery>) -> Result<(), String> {
         .map_err(err)
 }
 
-/// Opens the project's releases page in the default browser (fixed URL, never caller-supplied).
+/// Downloads the release `tag` and installs it, then the app exits and starts again as the new
+/// version. Installed copy: runs the NSIS installer (`/P` progress only, `/UPDATE` no prompts,
+/// `/R` relaunch). Portable exe (no `uninstall.exe` beside it): swaps itself with the release exe.
+/// Only `tag` is caller-supplied and must look like `v1.2.3`, so the URL can only point at this
+/// project's release assets. The download uses `curl.exe` (ships with Windows 10+), no extra crate.
+#[cfg(windows)]
 #[tauri::command]
-fn open_release_page() -> Result<(), String> {
-    std::process::Command::new("explorer")
-        .arg("https://github.com/R00neyj/broke_emoji/releases/latest")
-        .spawn()
-        .map(|_| ())
-        .map_err(err)
+async fn install_update(app: tauri::AppHandle, tag: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || apply_update(&tag))
+        .await
+        .map_err(err)??;
+    app.exit(0);
+    Ok(())
+}
+
+#[cfg(windows)]
+fn apply_update(tag: &str) -> Result<(), String> {
+    use std::{io::Read, os::windows::process::CommandExt, process::Command};
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    const DETACHED_PROCESS: u32 = 0x0000_0008;
+
+    if cfg!(debug_assertions) {
+        // `current_exe` would be the cargo debug binary, which must not be replaced.
+        return Err("개발 빌드는 업데이트하지 않아요".into());
+    }
+
+    let valid_tag = tag.strip_prefix('v').is_some_and(|v| {
+        let parts: Vec<&str> = v.split('.').collect();
+        parts.len() == 3 && parts.iter().all(|p| (1..=5).contains(&p.len()) && p.bytes().all(|b| b.is_ascii_digit()))
+    });
+    if !valid_tag {
+        return Err(format!("잘못된 버전: {tag}"));
+    }
+    let exe = std::env::current_exe().map_err(err)?;
+    let dir = exe.parent().ok_or("exe 폴더를 찾을 수 없어요")?;
+    let installed = dir.join("uninstall.exe").is_file();
+    let asset = if installed {
+        format!("broke_emoji-{tag}-setup.exe")
+    } else {
+        format!("broke_emoji-{tag}.exe")
+    };
+    // Portable: next to the exe so the swap is a same-volume rename.
+    let dest = if installed { std::env::temp_dir().join(&asset) } else { exe.with_extension("exe.new") };
+
+    let curl = Path::new(&std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into()))
+        .join("System32")
+        .join("curl.exe");
+    let status = Command::new(curl)
+        .args(["-L", "-f", "-sS", "--max-time", "600", "-o"])
+        .arg(&dest)
+        .arg(format!("{RELEASE_DOWNLOAD}/{tag}/{asset}"))
+        .creation_flags(CREATE_NO_WINDOW)
+        .status()
+        .map_err(|e| format!("다운로드를 시작할 수 없어요: {e}"))?;
+    // A real Windows executable of plausible size, not an error page.
+    let mut magic = [0u8; 2];
+    let intact = status.success()
+        && fs::metadata(&dest).is_ok_and(|m| m.len() > 1_000_000)
+        && fs::File::open(&dest).and_then(|mut f| f.read_exact(&mut magic)).is_ok()
+        && &magic == b"MZ";
+    if !intact {
+        let _ = fs::remove_file(&dest);
+        return Err("업데이트를 다운로드하지 못했어요".into());
+    }
+
+    if installed {
+        Command::new(&dest)
+            .args(["/P", "/UPDATE", "/R"])
+            .creation_flags(DETACHED_PROCESS)
+            .spawn()
+            .map_err(|e| format!("설치 프로그램을 실행할 수 없어요: {e}"))?;
+    } else {
+        // A running exe can be renamed but not overwritten.
+        let old = exe.with_extension("exe.old");
+        let _ = fs::remove_file(&old);
+        fs::rename(&exe, &old).map_err(err)?;
+        if let Err(e) = fs::rename(&dest, &exe) {
+            let _ = fs::rename(&old, &exe);
+            return Err(err(e));
+        }
+        if let Err(e) = Command::new(&exe).arg(UPDATED_ARG).creation_flags(DETACHED_PROCESS).spawn() {
+            let _ = fs::rename(&exe, &dest);
+            let _ = fs::rename(&old, &exe);
+            return Err(format!("새 버전을 시작할 수 없어요: {e}"));
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(windows))]
+#[tauri::command]
+fn install_update() -> Result<(), String> {
+    Err("Windows에서만 지원해요".into())
 }
 
 /// Puts an opaque RGBA bitmap on the clipboard as image data (not a file path).
@@ -557,16 +646,25 @@ async fn open_settings(app: tauri::AppHandle, data: State<'_, DataDir>) -> Resul
 #[cfg(windows)]
 fn single_instance() -> bool {
     use windows_sys::Win32::{
-        Foundation::{GetLastError, ERROR_ALREADY_EXISTS},
+        Foundation::{CloseHandle, GetLastError, ERROR_ALREADY_EXISTS},
         System::Threading::CreateMutexW,
         UI::WindowsAndMessaging::{FindWindowW, SetForegroundWindow, ShowWindow, SW_RESTORE, SW_SHOW},
     };
     let wide = |s: &str| s.encode_utf16().chain(std::iter::once(0)).collect::<Vec<u16>>();
+    // After a portable self-update the old process is still exiting: retry for up to 5 s.
+    let attempts = if std::env::args().any(|a| a == UPDATED_ARG) { 50 } else { 1 };
     // SAFETY: NUL-terminated UTF-16 buffers; the mutex handle is kept until exit on purpose.
     unsafe {
-        CreateMutexW(std::ptr::null(), 0, wide("com.yoonjinwon.makeemoji").as_ptr());
-        if GetLastError() != ERROR_ALREADY_EXISTS {
-            return true;
+        for attempt in 1..=attempts {
+            let mutex = CreateMutexW(std::ptr::null(), 0, wide("com.yoonjinwon.makeemoji").as_ptr());
+            if GetLastError() != ERROR_ALREADY_EXISTS {
+                return true;
+            }
+            if attempt < attempts {
+                // A mutex lives until its last handle closes, so ours must go before retrying.
+                CloseHandle(mutex);
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
         }
         let w = FindWindowW(std::ptr::null(), wide(APP_NAME).as_ptr());
         if !w.is_null() {
@@ -590,6 +688,10 @@ fn main() {
         .expect("cannot locate exe folder");
     fs::create_dir_all(&data).expect("cannot create data folder");
     let _ = fs::remove_dir_all(data.join("drag"));
+    // Leftover of a portable self-update (the old exe was renamed while it ran).
+    if let Ok(exe) = std::env::current_exe() {
+        let _ = fs::remove_file(exe.with_extension("exe.old"));
+    }
     // Handed to the page before main.js runs; parsed (and validated) there.
     let settings = fs::read_to_string(data.join("settings.json")).unwrap_or_default();
 
@@ -615,7 +717,7 @@ fn main() {
             set_dock,
             set_autostart,
             open_settings,
-            open_release_page
+            install_update
         ])
         .setup(move |app| {
             let webview_dir = data.join("webview");
